@@ -68,7 +68,6 @@ set(MTK_CORE_SOURCES
 
 set(MTK_CMD_SOURCES
     src/cmds/git.cpp
-    src/cmds/exec.cpp
     src/cmds/ls.cpp
     src/cmds/grep.cpp
 )

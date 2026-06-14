@@ -3,12 +3,15 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <tuple>
 #include <vector>
+
+#include "core/registry.hpp"
 
 namespace mtk::cmds::grep {
 
-int run(const std::vector<std::string>& args);
+// Registers all grep-related filters into the given registry at Tier::Builtin
+// with is_final=true.
+void register_builtins(mtk::core::Registry& reg);
 
 namespace internal {
 

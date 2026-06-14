@@ -9,6 +9,7 @@
 
 #include "core/exec.hpp"
 #include "core/exit_codes.hpp"
+#include "core/filter.hpp"
 #include "core/limits.hpp"
 #include "core/run_context.hpp"
 #include "core/utils.hpp"
@@ -279,45 +280,66 @@ std::vector<std::string> build_ls_argv(const std::vector<std::string>& args) {
 
 }  // namespace
 
-int run(const std::vector<std::string>& args) {
-    auto opts = internal::parse_args(args);
-    auto argv = build_ls_argv(args);
+// Per A1: dedicated C++ filter for `ls`. Reuses the pure internal helpers
+// (parse_args, compact_ls) — only the dispatch shell changed.
+class LsFilter final : public mtk::core::Filter {
+public:
+    [[nodiscard]] std::string_view name() const noexcept override { return "ls"; }
+    [[nodiscard]] std::string_view source() const noexcept override { return "builtin"; }
 
-    mtk::core::RunContext ctx;
-    auto outcome = ctx.capture(argv, {{"LC_ALL", "C"}});
-    const auto* ran = ctx.as_ran(outcome);
-    if (!ran) return ctx.report_spawn_failure(outcome, "ls");
-
-    if (!ran->clean()) {
-        std::cout << ran->stdout_data;
-        if (!ran->stderr_data.empty()) std::cerr << ran->stderr_data;
-        return ran->exit_code;
+    [[nodiscard]] std::optional<mtk::core::DispatchTokenPtr>
+    try_match(const std::vector<std::string>& argv) const noexcept override {
+        if (argv.empty() || argv[0] != "ls") return std::nullopt;
+        return mtk::core::DispatchTokenPtr{};
     }
 
-    internal::CompactResult result;
-    try {
-        result = internal::compact_ls(ran->stdout_data, opts.show_all, opts.show_long);
-    } catch (const std::exception& e) {
-        std::cerr << "mtk ls: filter warning: " << e.what() << '\n';
-        std::cout << ran->stdout_data;
-        return 0;
-    }
+    [[nodiscard]] mtk::core::exec::ExecOutcome
+    run(mtk::core::DispatchTokenPtr,
+        const std::vector<std::string>& argv,
+        mtk::core::RunContext& ctx) override {
+        std::vector<std::string> user_args(argv.begin() + 1, argv.end());
+        auto opts = internal::parse_args(user_args);
+        auto cmd_argv = build_ls_argv(user_args);
 
-    bool has_real_content = false;
-    for (const auto& line : mtk::core::utils::split_lines(ran->stdout_data)) {
-        if (line.empty()) continue;
-        if (line.substr(0, 6) == "total ") continue;
-        if (internal::is_dotdir(line)) continue;
-        has_real_content = true;
-        break;
-    }
-    if (result.parsed_count == 0 && has_real_content) {
-        std::cout << ran->stdout_data;
-        return 0;
-    }
+        auto outcome = ctx.capture(cmd_argv, {{"LC_ALL", "C"}});
+        const auto* ran = ctx.as_ran(outcome);
+        if (!ran) return outcome;  // SpawnFailed flows through
 
-    std::cout << result.entries << result.summary;
-    return 0;
+        if (!ran->clean()) {
+            return outcome;  // pass raw on non-zero
+        }
+
+        internal::CompactResult result;
+        try {
+            result = internal::compact_ls(ran->stdout_data, opts.show_all, opts.show_long);
+        } catch (const std::exception&) {
+            return outcome;  // fallback to raw per A4
+        }
+
+        bool has_real_content = false;
+        for (const auto& line : mtk::core::utils::split_lines(ran->stdout_data)) {
+            if (line.empty()) continue;
+            if (line.substr(0, 6) == "total ") continue;
+            if (internal::is_dotdir(line)) continue;
+            has_real_content = true;
+            break;
+        }
+        if (result.parsed_count == 0 && has_real_content) {
+            return outcome;  // parser found nothing — pass raw
+        }
+
+        return mtk::core::exec::Ran{
+            result.entries + result.summary,
+            std::string{},
+            0,
+            ran->truncated, ran->timed_out, ran->killed_by_signal,
+        };
+    }
+};
+
+void register_builtins(mtk::core::Registry& reg) {
+    reg.register_filter(std::make_unique<LsFilter>(),
+                        mtk::core::Tier::Builtin, /*is_final=*/true);
 }
 
 }  // namespace mtk::cmds::ls

@@ -5,9 +5,13 @@
 #include <string_view>
 #include <vector>
 
+#include "core/registry.hpp"
+
 namespace mtk::cmds::ls {
 
-int run(const std::vector<std::string>& args);
+// Registers all ls-related filters into the given registry at Tier::Builtin
+// with is_final=true (per A2: project filters cannot shadow built-ins).
+void register_builtins(mtk::core::Registry& reg);
 
 namespace internal {
 

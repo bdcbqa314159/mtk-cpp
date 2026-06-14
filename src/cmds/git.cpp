@@ -9,6 +9,7 @@
 #include "core/constants.hpp"
 #include "core/exec.hpp"
 #include "core/exit_codes.hpp"
+#include "core/filter.hpp"
 #include "core/limits.hpp"
 #include "core/run_context.hpp"
 #include "core/tee.hpp"
@@ -368,242 +369,265 @@ std::vector<std::string> build_log_argv(const std::vector<std::string>& user_arg
     return argv;
 }
 
-int run_log(const std::vector<std::string>& user_args) {
-    namespace lim = mtk::core::limits::git_log;
-    auto opts = internal::detect_log_options(user_args);
-    auto argv = build_log_argv(user_args, opts, lim::kDefaultCommitCount);
-
-    mtk::core::RunContext ctx;
-    auto outcome = ctx.capture(argv);
-    const auto* ran = ctx.as_ran(outcome);
-    if (!ran) return ctx.report_spawn_failure(outcome, "git");
-
-    if (opts.user_set_format) {
-        std::cout << ran->stdout_data;
-    } else {
-        std::string filtered;
-        try {
-            filtered = internal::filter_log_output(
-                ran->stdout_data,
-                opts.user_set_count ? lim::kUserSetCountCap : lim::kDefaultCommitCount,
-                opts.user_set_count ? lim::kWideHeaderWidth : lim::kDefaultHeaderWidth,
-                lim::kMaxBodyLines);
-        } catch (const std::exception& e) {
-            std::cerr << "mtk git: filter warning: " << e.what() << '\n';
-            filtered = ran->stdout_data;
-        }
-        std::cout << filtered;
-        if (!filtered.empty() && filtered.back() != '\n') std::cout << '\n';
-    }
-
-    if (!ran->clean()) {
-        ctx.tee_on_failure(outcome, "git_log");
-        if (!ran->stderr_data.empty()) std::cerr << ran->stderr_data;
-    }
-    return ran->exit_code;
-}
-
 bool is_blob_show_arg(const std::string& a) {
     return !a.empty() && a[0] != '-' && a.find(':') != std::string::npos;
 }
 
-int run_show(const std::vector<std::string>& user_args) {
-    bool wants_stat_only = false;
-    bool wants_format = false;
-    bool wants_blob = false;
-    for (const auto& a : user_args) {
-        if (a == "--stat" || a == "--numstat" || a == "--shortstat") wants_stat_only = true;
-        if (a.rfind("--pretty", 0) == 0 || a.rfind("--format", 0) == 0) wants_format = true;
-        if (is_blob_show_arg(a)) wants_blob = true;
+namespace ex = mtk::core::exec;
+using mtk::core::DispatchTokenPtr;
+
+// --- GitLogFilter ---
+class GitLogFilter final : public mtk::core::Filter {
+public:
+    [[nodiscard]] std::string_view name() const noexcept override { return "git_log"; }
+    [[nodiscard]] std::string_view source() const noexcept override { return "builtin"; }
+
+    [[nodiscard]] std::optional<DispatchTokenPtr>
+    try_match(const std::vector<std::string>& argv) const noexcept override {
+        if (argv.size() < 2 || argv[0] != "git" || argv[1] != "log") return std::nullopt;
+        return DispatchTokenPtr{};
     }
 
-    mtk::core::RunContext ctx;
+    [[nodiscard]] ex::ExecOutcome
+    run(DispatchTokenPtr, const std::vector<std::string>& argv,
+        mtk::core::RunContext& ctx) override {
+        namespace lim = mtk::core::limits::git_log;
+        std::vector<std::string> user_args(argv.begin() + 2, argv.end());
+        auto opts = internal::detect_log_options(user_args);
+        auto cmd_argv = build_log_argv(user_args, opts, lim::kDefaultCommitCount);
 
-    if (wants_stat_only || wants_format || wants_blob) {
-        std::vector<std::string> argv = {"git", "show"};
-        argv.insert(argv.end(), user_args.begin(), user_args.end());
-        auto outcome = ctx.capture(argv);
+        auto outcome = ctx.capture(cmd_argv);
         const auto* ran = ctx.as_ran(outcome);
-        if (!ran) return ctx.report_spawn_failure(outcome, "git");
-        std::cout << ran->stdout_data;
-        if (!ran->stderr_data.empty()) std::cerr << ran->stderr_data;
-        return ran->exit_code;
-    }
+        if (!ran) return outcome;
 
-    std::vector<std::string> sum_argv = {"git", "show", "--no-patch",
-                                         "--pretty=format:%h %s (%ar) <%an>"};
-    sum_argv.insert(sum_argv.end(), user_args.begin(), user_args.end());
-    auto sum_out = ctx.capture(sum_argv);
-    const auto* sum = ctx.as_ran(sum_out);
-    if (!sum) return ctx.report_spawn_failure(sum_out, "git");
-    if (!sum->clean()) {
-        if (!sum->stderr_data.empty()) std::cerr << sum->stderr_data;
-        return sum->exit_code;
-    }
-    std::cout << sum->stdout_data;
-    if (!sum->stdout_data.empty() && sum->stdout_data.back() != '\n') std::cout << '\n';
+        ctx.tee_on_failure(outcome, "git_log");
 
-    std::vector<std::string> stat_argv = {"git", "show", "--stat", "--pretty=format:"};
-    stat_argv.insert(stat_argv.end(), user_args.begin(), user_args.end());
-    auto stat_out = ctx.capture(stat_argv);
-    if (const auto* stat = ctx.as_ran(stat_out); stat && !stat->stdout_data.empty()) {
-        std::cout << stat->stdout_data;
-    }
-
-    std::vector<std::string> diff_argv = {"git", "show", "--pretty=format:"};
-    diff_argv.insert(diff_argv.end(), user_args.begin(), user_args.end());
-    auto diff_out = ctx.capture(diff_argv);
-    if (const auto* diff = ctx.as_ran(diff_out); diff && !diff->stdout_data.empty()) {
-        std::string compacted;
-        try {
-            compacted = internal::compact_diff(diff->stdout_data);
-        } catch (const std::exception& e) {
-            std::cerr << "mtk git: filter warning: " << e.what() << '\n';
-            compacted = diff->stdout_data;
-        }
-        std::cout << compacted;
-        if (!compacted.empty() && compacted.back() != '\n') std::cout << '\n';
-    }
-    return 0;
-}
-
-int run_diff(const std::vector<std::string>& user_args) {
-    auto opts = internal::detect_diff_options(user_args);
-
-    std::vector<std::string> args_no_compact;
-    args_no_compact.reserve(user_args.size());
-    for (const auto& a : user_args) {
-        if (a != "--no-compact") args_no_compact.push_back(a);
-    }
-
-    mtk::core::RunContext ctx;
-
-    if (opts.wants_stat || opts.wants_no_compact) {
-        std::vector<std::string> argv = {"git", "diff"};
-        argv.insert(argv.end(), args_no_compact.begin(), args_no_compact.end());
-        auto outcome = ctx.capture(argv);
-        const auto* ran = ctx.as_ran(outcome);
-        if (!ran) return ctx.report_spawn_failure(outcome, "git");
-        std::cout << ran->stdout_data;
-        if (!ran->stderr_data.empty()) std::cerr << ran->stderr_data;
-        return ran->exit_code;
-    }
-
-    std::vector<std::string> stat_argv = {"git", "diff", "--stat"};
-    stat_argv.insert(stat_argv.end(), args_no_compact.begin(), args_no_compact.end());
-    auto stat_out = ctx.capture(stat_argv);
-    const auto* stat = ctx.as_ran(stat_out);
-    if (!stat) return ctx.report_spawn_failure(stat_out, "git");
-    if (!stat->clean()) {
-        std::cout << stat->stdout_data;
-        if (!stat->stderr_data.empty()) std::cerr << stat->stderr_data;
-        return stat->exit_code;
-    }
-
-    if (!stat->stdout_data.empty()) {
-        std::cout << stat->stdout_data;
-        if (stat->stdout_data.back() != '\n') std::cout << '\n';
-    }
-
-    std::vector<std::string> diff_argv = {"git", "diff"};
-    diff_argv.insert(diff_argv.end(), args_no_compact.begin(), args_no_compact.end());
-    auto diff_out = ctx.capture(diff_argv);
-    const auto* diff = ctx.as_ran(diff_out);
-    if (!diff) return ctx.report_spawn_failure(diff_out, "git");
-
-    if (!diff->stdout_data.empty()) {
-        std::cout << "\nChanges:";
-        std::string compacted;
-        try {
-            compacted = internal::compact_diff(diff->stdout_data);
-        } catch (const std::exception& e) {
-            std::cerr << "mtk git: filter warning: " << e.what() << '\n';
-            compacted = diff->stdout_data;
-        }
-        std::cout << compacted;
-        if (!compacted.empty() && compacted.back() != '\n') std::cout << '\n';
-    }
-
-    return diff->exit_code;
-}
-
-int run_status(const std::vector<std::string>& user_args) {
-    mtk::core::RunContext ctx;
-
-    if (!internal::uses_compact_status_path(user_args)) {
-        std::vector<std::string> argv = {"git", "status"};
-        argv.insert(argv.end(), user_args.begin(), user_args.end());
-        auto outcome = ctx.capture(argv);
-        const auto* ran = ctx.as_ran(outcome);
-        if (!ran) return ctx.report_spawn_failure(outcome, "git");
-        if (!ran->clean()) {
-            std::cout << ran->stdout_data;
-            if (!ran->stderr_data.empty()) std::cerr << ran->stderr_data;
-            return ran->exit_code;
-        }
         std::string filtered;
-        try {
-            filtered = internal::filter_status_with_args(ran->stdout_data);
-        } catch (const std::exception& e) {
-            std::cerr << "mtk git: filter warning: " << e.what() << '\n';
+        if (opts.user_set_format) {
             filtered = ran->stdout_data;
+        } else {
+            try {
+                filtered = internal::filter_log_output(
+                    ran->stdout_data,
+                    opts.user_set_count ? lim::kUserSetCountCap : lim::kDefaultCommitCount,
+                    opts.user_set_count ? lim::kWideHeaderWidth : lim::kDefaultHeaderWidth,
+                    lim::kMaxBodyLines);
+            } catch (const std::exception&) {
+                filtered = ran->stdout_data;  // A4 fallback
+            }
         }
-        std::cout << filtered;
-        if (!filtered.empty() && filtered.back() != '\n') std::cout << '\n';
-        return 0;
+        return ex::Ran{std::move(filtered), ran->stderr_data, ran->exit_code,
+                       ran->truncated, ran->timed_out, ran->killed_by_signal};
+    }
+};
+
+// --- GitStatusFilter ---
+class GitStatusFilter final : public mtk::core::Filter {
+public:
+    [[nodiscard]] std::string_view name() const noexcept override { return "git_status"; }
+    [[nodiscard]] std::string_view source() const noexcept override { return "builtin"; }
+
+    [[nodiscard]] std::optional<DispatchTokenPtr>
+    try_match(const std::vector<std::string>& argv) const noexcept override {
+        if (argv.size() < 2 || argv[0] != "git" || argv[1] != "status") return std::nullopt;
+        return DispatchTokenPtr{};
     }
 
-    std::vector<std::string> plain_argv = {"git", "status"};
-    plain_argv.insert(plain_argv.end(), user_args.begin(), user_args.end());
-    auto plain_out = ctx.capture(plain_argv);
+    [[nodiscard]] ex::ExecOutcome
+    run(DispatchTokenPtr, const std::vector<std::string>& argv,
+        mtk::core::RunContext& ctx) override {
+        std::vector<std::string> user_args(argv.begin() + 2, argv.end());
 
-    std::vector<std::string> porcelain_argv = {"git", "status", "--porcelain", "-b"};
-    auto porcelain_out = ctx.capture(porcelain_argv);
-    const auto* porcelain = ctx.as_ran(porcelain_out);
-    if (!porcelain) return ctx.report_spawn_failure(porcelain_out, "git");
+        if (!internal::uses_compact_status_path(user_args)) {
+            std::vector<std::string> cmd_argv = {"git", "status"};
+            cmd_argv.insert(cmd_argv.end(), user_args.begin(), user_args.end());
+            auto outcome = ctx.capture(cmd_argv);
+            const auto* ran = ctx.as_ran(outcome);
+            if (!ran) return outcome;
+            if (!ran->clean()) return outcome;
 
-    if (!porcelain->stderr_data.empty() &&
-        porcelain->stderr_data.find("not a git repository") != std::string::npos) {
-        std::cerr << "Not a git repository\n";
-        return porcelain->exit_code != 0 ? porcelain->exit_code : 128;
+            std::string filtered;
+            try {
+                filtered = internal::filter_status_with_args(ran->stdout_data);
+            } catch (const std::exception&) {
+                filtered = ran->stdout_data;
+            }
+            return ex::Ran{std::move(filtered), std::string{}, 0,
+                           ran->truncated, ran->timed_out, ran->killed_by_signal};
+        }
+
+        std::vector<std::string> plain_argv = {"git", "status"};
+        plain_argv.insert(plain_argv.end(), user_args.begin(), user_args.end());
+        auto plain_out = ctx.capture(plain_argv);
+
+        std::vector<std::string> porcelain_argv = {"git", "status", "--porcelain", "-b"};
+        auto porcelain_out = ctx.capture(porcelain_argv);
+        const auto* porcelain = ctx.as_ran(porcelain_out);
+        if (!porcelain) return porcelain_out;
+
+        if (!porcelain->stderr_data.empty() &&
+            porcelain->stderr_data.find("not a git repository") != std::string::npos) {
+            return ex::Ran{std::string{}, "Not a git repository\n",
+                           porcelain->exit_code != 0 ? porcelain->exit_code : 128,
+                           false, false, 0};
+        }
+
+        const auto* plain = ctx.as_ran(plain_out);
+        std::string_view plain_view = (plain && plain->clean())
+            ? std::string_view(plain->stdout_data) : std::string_view{};
+
+        auto detached = internal::extract_detached_head(plain_view);
+        auto formatted = internal::format_status_output(porcelain->stdout_data, detached);
+        auto state = internal::extract_state_header(plain_view);
+
+        std::string out;
+        if (state) { out += *state; out += '\n'; }
+        out += formatted;
+        return ex::Ran{std::move(out), std::string{}, porcelain->exit_code,
+                       porcelain->truncated, porcelain->timed_out,
+                       porcelain->killed_by_signal};
+    }
+};
+
+// --- GitDiffFilter ---
+class GitDiffFilter final : public mtk::core::Filter {
+public:
+    [[nodiscard]] std::string_view name() const noexcept override { return "git_diff"; }
+    [[nodiscard]] std::string_view source() const noexcept override { return "builtin"; }
+
+    [[nodiscard]] std::optional<DispatchTokenPtr>
+    try_match(const std::vector<std::string>& argv) const noexcept override {
+        if (argv.size() < 2 || argv[0] != "git" || argv[1] != "diff") return std::nullopt;
+        return DispatchTokenPtr{};
     }
 
-    // Plain status is only used to surface state/detached-HEAD info that
-    // porcelain collapses. If plain failed (spawn or non-zero exit), skip
-    // those extractions rather than feeding garbage to the parsers.
-    const auto* plain = ctx.as_ran(plain_out);
-    std::string_view plain_view =
-        (plain && plain->clean()) ? std::string_view(plain->stdout_data) : std::string_view{};
+    [[nodiscard]] ex::ExecOutcome
+    run(DispatchTokenPtr, const std::vector<std::string>& argv,
+        mtk::core::RunContext& ctx) override {
+        std::vector<std::string> user_args(argv.begin() + 2, argv.end());
+        auto opts = internal::detect_diff_options(user_args);
 
-    auto detached = internal::extract_detached_head(plain_view);
-    auto formatted = internal::format_status_output(porcelain->stdout_data, detached);
-    auto state = internal::extract_state_header(plain_view);
+        std::vector<std::string> args_no_compact;
+        args_no_compact.reserve(user_args.size());
+        for (const auto& a : user_args) {
+            if (a != "--no-compact") args_no_compact.push_back(a);
+        }
 
-    if (state) std::cout << *state << '\n';
-    std::cout << formatted;
-    if (!formatted.empty() && formatted.back() != '\n') std::cout << '\n';
+        if (opts.wants_stat || opts.wants_no_compact) {
+            std::vector<std::string> cmd_argv = {"git", "diff"};
+            cmd_argv.insert(cmd_argv.end(), args_no_compact.begin(), args_no_compact.end());
+            return ctx.capture(cmd_argv);  // raw passthrough of git diff output
+        }
 
-    return porcelain->exit_code;
-}
+        std::vector<std::string> stat_argv = {"git", "diff", "--stat"};
+        stat_argv.insert(stat_argv.end(), args_no_compact.begin(), args_no_compact.end());
+        auto stat_out = ctx.capture(stat_argv);
+        const auto* stat = ctx.as_ran(stat_out);
+        if (!stat) return stat_out;
+        if (!stat->clean()) return stat_out;
+
+        std::string out;
+        if (!stat->stdout_data.empty()) {
+            out = stat->stdout_data;
+            if (out.back() != '\n') out += '\n';
+        }
+
+        std::vector<std::string> diff_argv = {"git", "diff"};
+        diff_argv.insert(diff_argv.end(), args_no_compact.begin(), args_no_compact.end());
+        auto diff_out = ctx.capture(diff_argv);
+        const auto* diff = ctx.as_ran(diff_out);
+        if (!diff) return diff_out;
+
+        if (!diff->stdout_data.empty()) {
+            out += "\nChanges:";
+            std::string compacted;
+            try {
+                compacted = internal::compact_diff(diff->stdout_data);
+            } catch (const std::exception&) {
+                compacted = diff->stdout_data;
+            }
+            out += compacted;
+        }
+        return ex::Ran{std::move(out), std::string{}, diff->exit_code,
+                       diff->truncated, diff->timed_out, diff->killed_by_signal};
+    }
+};
+
+// --- GitShowFilter ---
+class GitShowFilter final : public mtk::core::Filter {
+public:
+    [[nodiscard]] std::string_view name() const noexcept override { return "git_show"; }
+    [[nodiscard]] std::string_view source() const noexcept override { return "builtin"; }
+
+    [[nodiscard]] std::optional<DispatchTokenPtr>
+    try_match(const std::vector<std::string>& argv) const noexcept override {
+        if (argv.size() < 2 || argv[0] != "git" || argv[1] != "show") return std::nullopt;
+        return DispatchTokenPtr{};
+    }
+
+    [[nodiscard]] ex::ExecOutcome
+    run(DispatchTokenPtr, const std::vector<std::string>& argv,
+        mtk::core::RunContext& ctx) override {
+        std::vector<std::string> user_args(argv.begin() + 2, argv.end());
+        bool wants_stat_only = false, wants_format = false, wants_blob = false;
+        for (const auto& a : user_args) {
+            if (a == "--stat" || a == "--numstat" || a == "--shortstat") wants_stat_only = true;
+            if (a.rfind("--pretty", 0) == 0 || a.rfind("--format", 0) == 0) wants_format = true;
+            if (is_blob_show_arg(a)) wants_blob = true;
+        }
+
+        if (wants_stat_only || wants_format || wants_blob) {
+            std::vector<std::string> cmd_argv = {"git", "show"};
+            cmd_argv.insert(cmd_argv.end(), user_args.begin(), user_args.end());
+            return ctx.capture(cmd_argv);
+        }
+
+        std::vector<std::string> sum_argv = {"git", "show", "--no-patch",
+                                             "--pretty=format:%h %s (%ar) <%an>"};
+        sum_argv.insert(sum_argv.end(), user_args.begin(), user_args.end());
+        auto sum_out = ctx.capture(sum_argv);
+        const auto* sum = ctx.as_ran(sum_out);
+        if (!sum) return sum_out;
+        if (!sum->clean()) {
+            return ex::Ran{std::string{}, sum->stderr_data, sum->exit_code,
+                           sum->truncated, sum->timed_out, sum->killed_by_signal};
+        }
+
+        std::string out = sum->stdout_data;
+        if (!out.empty() && out.back() != '\n') out += '\n';
+
+        std::vector<std::string> stat_argv = {"git", "show", "--stat", "--pretty=format:"};
+        stat_argv.insert(stat_argv.end(), user_args.begin(), user_args.end());
+        auto stat_out = ctx.capture(stat_argv);
+        if (const auto* stat = ctx.as_ran(stat_out); stat && !stat->stdout_data.empty()) {
+            out += stat->stdout_data;
+        }
+
+        std::vector<std::string> diff_argv = {"git", "show", "--pretty=format:"};
+        diff_argv.insert(diff_argv.end(), user_args.begin(), user_args.end());
+        auto diff_out = ctx.capture(diff_argv);
+        if (const auto* diff = ctx.as_ran(diff_out); diff && !diff->stdout_data.empty()) {
+            std::string compacted;
+            try {
+                compacted = internal::compact_diff(diff->stdout_data);
+            } catch (const std::exception&) {
+                compacted = diff->stdout_data;
+            }
+            out += compacted;
+            if (!compacted.empty() && compacted.back() != '\n') out += '\n';
+        }
+        return ex::Ran{std::move(out), std::string{}, 0, false, false, 0};
+    }
+};
 
 }  // namespace
 
-int run(const std::vector<std::string>& args) {
-    mtk::core::RunContext ctx;
-    if (args.empty()) {
-        return ctx.passthrough({"git"});
-    }
-    const std::string& sub = args[0];
-    std::vector<std::string> user_args(args.begin() + 1, args.end());
-
-    if (sub == "log") return run_log(user_args);
-    if (sub == "status") return run_status(user_args);
-    if (sub == "diff") return run_diff(user_args);
-    if (sub == "show") return run_show(user_args);
-
-    std::vector<std::string> argv = {"git"};
-    argv.insert(argv.end(), args.begin(), args.end());
-    return ctx.passthrough(argv);
+void register_builtins(mtk::core::Registry& reg) {
+    namespace ct = mtk::core;
+    reg.register_filter(std::make_unique<GitLogFilter>(),    ct::Tier::Builtin, true);
+    reg.register_filter(std::make_unique<GitStatusFilter>(), ct::Tier::Builtin, true);
+    reg.register_filter(std::make_unique<GitDiffFilter>(),   ct::Tier::Builtin, true);
+    reg.register_filter(std::make_unique<GitShowFilter>(),   ct::Tier::Builtin, true);
 }
 
 }  // namespace mtk::cmds::git

@@ -5,9 +5,13 @@
 #include <string_view>
 #include <vector>
 
+#include "core/registry.hpp"
+
 namespace mtk::cmds::git {
 
-int run(const std::vector<std::string>& args);
+// Registers GitLogFilter, GitStatusFilter, GitDiffFilter, GitShowFilter
+// into the given registry at Tier::Builtin with is_final=true.
+void register_builtins(mtk::core::Registry& reg);
 
 namespace internal {
 

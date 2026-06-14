@@ -7,6 +7,7 @@
 
 #include "core/exec.hpp"
 #include "core/exit_codes.hpp"
+#include "core/filter.hpp"
 #include "core/limits.hpp"
 #include "core/run_context.hpp"
 #include "core/utils.hpp"
@@ -201,81 +202,102 @@ std::vector<std::string> build_grep_argv(const CliParse& cli) {
 
 }  // namespace
 
-int run(const std::vector<std::string>& args) {
-    auto cli = split_cli(args);
-    if (!cli.ok) {
-        std::cerr << "mtk grep: missing pattern\n";
-        return mtk::core::exit_codes::kUsage;
+class GrepFilter final : public mtk::core::Filter {
+public:
+    [[nodiscard]] std::string_view name() const noexcept override { return "grep"; }
+    [[nodiscard]] std::string_view source() const noexcept override { return "builtin"; }
+
+    [[nodiscard]] std::optional<mtk::core::DispatchTokenPtr>
+    try_match(const std::vector<std::string>& argv) const noexcept override {
+        if (argv.empty()) return std::nullopt;
+        if (argv[0] != "grep" && argv[0] != "rg") return std::nullopt;
+        return mtk::core::DispatchTokenPtr{};
     }
 
-    mtk::core::RunContext ctx;
-    auto outcome = ctx.capture(build_rg_argv(cli));
-    if (ctx.is_spawn_failed(outcome)) {
-        // rg not on PATH — try POSIX grep as fallback.
-        outcome = ctx.capture(build_grep_argv(cli));
-    }
-    const auto* ran = ctx.as_ran(outcome);
-    if (!ran) return ctx.report_spawn_failure(outcome, "grep");
-
-    if (internal::has_format_flag(cli.extras)) {
-        std::cout << ran->stdout_data;
-        if (!ran->stderr_data.empty()) std::cerr << ran->stderr_data;
-        return ran->exit_code;
-    }
-
-    bool stdout_empty = true;
-    for (char c : ran->stdout_data) {
-        if (!std::isspace(static_cast<unsigned char>(c))) {
-            stdout_empty = false;
-            break;
+    [[nodiscard]] mtk::core::exec::ExecOutcome
+    run(mtk::core::DispatchTokenPtr,
+        const std::vector<std::string>& argv,
+        mtk::core::RunContext& ctx) override {
+        std::vector<std::string> user_args(argv.begin() + 1, argv.end());
+        auto cli = split_cli(user_args);
+        if (!cli.ok) {
+            return mtk::core::exec::Ran{
+                std::string{}, "mtk grep: missing pattern\n",
+                mtk::core::exit_codes::kUsage, false, false, 0,
+            };
         }
-    }
-    if (stdout_empty) {
-        if (ran->exit_code == 2 && !ran->stderr_data.empty()) {
-            std::cerr << ran->stderr_data;
+
+        auto outcome = ctx.capture(build_rg_argv(cli));
+        if (ctx.is_spawn_failed(outcome)) {
+            outcome = ctx.capture(build_grep_argv(cli));
         }
-        std::cout << "0 matches for '" << cli.pattern << "'\n";
-        return ran->exit_code;
-    }
+        const auto* ran = ctx.as_ran(outcome);
+        if (!ran) return outcome;
 
-    auto raw_lines = mtk::core::utils::split_lines(ran->stdout_data);
-    std::size_t total_matches = raw_lines.size();
-
-    std::unordered_map<std::string, std::vector<std::pair<std::size_t, std::string>>> by_file;
-    for (const auto& line : raw_lines) {
-        auto parsed = internal::parse_match_line(line);
-        if (!parsed) continue;
-        auto cleaned = internal::clean_line(parsed->content, lim::kMaxLineLen, cli.pattern);
-        by_file[parsed->file].emplace_back(parsed->line_num, std::move(cleaned));
-    }
-
-    std::ostringstream out;
-    out << total_matches << " matches in " << by_file.size() << " files:\n\n";
-
-    std::vector<std::pair<std::string, std::vector<std::pair<std::size_t, std::string>>>> files(
-        by_file.begin(), by_file.end());
-    std::sort(files.begin(), files.end(),
-              [](const auto& a, const auto& b) { return a.first < b.first; });
-
-    std::size_t shown = 0;
-    for (const auto& [file, matches] : files) {
-        if (shown >= lim::kMaxResults) break;
-        auto disp = internal::compact_path(file);
-        std::size_t emitted_for_file = 0;
-        for (const auto& [ln, content] : matches) {
-            if (shown >= lim::kMaxResults || emitted_for_file >= lim::kPerFile) break;
-            out << disp << ':' << ln << ':' << content << '\n';
-            ++shown;
-            ++emitted_for_file;
+        if (internal::has_format_flag(cli.extras)) {
+            return outcome;  // passthrough
         }
-    }
 
-    if (total_matches > shown) {
-        out << "[+" << (total_matches - shown) << " more]\n";
-    }
+        bool stdout_empty = true;
+        for (char c : ran->stdout_data) {
+            if (!std::isspace(static_cast<unsigned char>(c))) { stdout_empty = false; break; }
+        }
+        if (stdout_empty) {
+            return mtk::core::exec::Ran{
+                "0 matches for '" + cli.pattern + "'\n",
+                (ran->exit_code == 2) ? ran->stderr_data : std::string{},
+                ran->exit_code,
+                ran->truncated, ran->timed_out, ran->killed_by_signal,
+            };
+        }
 
-    std::cout << out.str();
-    return ran->exit_code;
+        auto raw_lines = mtk::core::utils::split_lines(ran->stdout_data);
+        std::size_t total_matches = raw_lines.size();
+
+        std::unordered_map<std::string, std::vector<std::pair<std::size_t, std::string>>>
+            by_file;
+        for (const auto& line : raw_lines) {
+            auto parsed = internal::parse_match_line(line);
+            if (!parsed) continue;
+            auto cleaned =
+                internal::clean_line(parsed->content, lim::kMaxLineLen, cli.pattern);
+            by_file[parsed->file].emplace_back(parsed->line_num, std::move(cleaned));
+        }
+
+        std::ostringstream out;
+        out << total_matches << " matches in " << by_file.size() << " files:\n\n";
+
+        std::vector<std::pair<std::string, std::vector<std::pair<std::size_t, std::string>>>>
+            files(by_file.begin(), by_file.end());
+        std::sort(files.begin(), files.end(),
+                  [](const auto& a, const auto& b) { return a.first < b.first; });
+
+        std::size_t shown = 0;
+        for (const auto& [file, matches] : files) {
+            if (shown >= lim::kMaxResults) break;
+            auto disp = internal::compact_path(file);
+            std::size_t emitted_for_file = 0;
+            for (const auto& [ln, content] : matches) {
+                if (shown >= lim::kMaxResults || emitted_for_file >= lim::kPerFile) break;
+                out << disp << ':' << ln << ':' << content << '\n';
+                ++shown;
+                ++emitted_for_file;
+            }
+        }
+        if (total_matches > shown) {
+            out << "[+" << (total_matches - shown) << " more]\n";
+        }
+
+        return mtk::core::exec::Ran{
+            out.str(), std::string{}, ran->exit_code,
+            ran->truncated, ran->timed_out, ran->killed_by_signal,
+        };
+    }
+};
+
+void register_builtins(mtk::core::Registry& reg) {
+    reg.register_filter(std::make_unique<GrepFilter>(),
+                        mtk::core::Tier::Builtin, /*is_final=*/true);
 }
 
 }  // namespace mtk::cmds::grep
