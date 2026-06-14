@@ -1,6 +1,7 @@
 #include "core/utils.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <regex>
 #include <sstream>
 
@@ -16,6 +17,25 @@ const std::regex& ansi_regex() {
 std::string strip_ansi(std::string_view input) {
     std::string s(input);
     return std::regex_replace(s, ansi_regex(), "");
+}
+
+bool starts_with(std::string_view s, std::string_view prefix) noexcept {
+    return s.size() >= prefix.size() &&
+           s.compare(0, prefix.size(), prefix) == 0;
+}
+
+std::string trim_copy(std::string_view s) {
+    std::size_t i = 0;
+    while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
+    std::size_t j = s.size();
+    while (j > i && std::isspace(static_cast<unsigned char>(s[j - 1]))) --j;
+    return std::string(s.substr(i, j - i));
+}
+
+std::string to_lower(std::string_view s) {
+    std::string out(s);
+    for (char& c : out) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return out;
 }
 
 std::string truncate(std::string_view input, std::size_t max_len) {

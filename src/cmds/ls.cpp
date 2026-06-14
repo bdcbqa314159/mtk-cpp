@@ -9,6 +9,7 @@
 
 #include "core/exec.hpp"
 #include "core/exit_codes.hpp"
+#include "core/limits.hpp"
 #include "core/utils.hpp"
 
 namespace mtk::cmds::ls {
@@ -34,17 +35,8 @@ const std::regex& ls_date_regex() {
     return re;
 }
 
-bool starts_with(const std::string& s, const std::string& p) {
-    return s.size() >= p.size() && std::equal(p.begin(), p.end(), s.begin());
-}
-
-std::string trim_copy(std::string_view s) {
-    std::size_t i = 0;
-    while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
-    std::size_t j = s.size();
-    while (j > i && std::isspace(static_cast<unsigned char>(s[j - 1]))) --j;
-    return std::string(s.substr(i, j - i));
-}
+using mtk::core::utils::starts_with;
+using mtk::core::utils::trim_copy;
 
 std::vector<std::string> split_whitespace(const std::string& s) {
     std::vector<std::string> parts;
@@ -151,11 +143,14 @@ std::optional<std::string> perms_to_octal(const std::string& perms) {
 }
 
 std::string human_size(std::uint64_t bytes) {
+    namespace flim = mtk::core::limits::fmt;
     char buf[32];
-    if (bytes >= 1048576) {
-        std::snprintf(buf, sizeof(buf), "%.1fM", static_cast<double>(bytes) / 1048576.0);
-    } else if (bytes >= 1024) {
-        std::snprintf(buf, sizeof(buf), "%.1fK", static_cast<double>(bytes) / 1024.0);
+    if (bytes >= flim::kHumanMB) {
+        std::snprintf(buf, sizeof(buf), "%.1fM",
+                      static_cast<double>(bytes) / static_cast<double>(flim::kHumanMB));
+    } else if (bytes >= flim::kHumanKB) {
+        std::snprintf(buf, sizeof(buf), "%.1fK",
+                      static_cast<double>(bytes) / static_cast<double>(flim::kHumanKB));
     } else {
         std::snprintf(buf, sizeof(buf), "%lluB", static_cast<unsigned long long>(bytes));
     }
@@ -233,7 +228,7 @@ CompactResult compact_ls(std::string_view raw, bool show_all, bool show_long) {
         std::vector<std::pair<std::string, std::size_t>> ext_counts(by_ext.begin(), by_ext.end());
         std::sort(ext_counts.begin(), ext_counts.end(),
                   [](const auto& a, const auto& b) { return a.second > b.second; });
-        constexpr std::size_t kMaxExt = 5;
+        constexpr auto kMaxExt = mtk::core::limits::ls::kExtSummaryMaxCount;
         summary << " (";
         for (std::size_t i = 0; i < std::min(kMaxExt, ext_counts.size()); ++i) {
             if (i) summary << ", ";

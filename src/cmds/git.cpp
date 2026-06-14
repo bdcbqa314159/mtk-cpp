@@ -6,8 +6,10 @@
 #include <sstream>
 #include <string>
 
+#include "core/constants.hpp"
 #include "core/exec.hpp"
 #include "core/exit_codes.hpp"
+#include "core/limits.hpp"
 #include "core/tee.hpp"
 #include "core/utils.hpp"
 
@@ -17,9 +19,7 @@ namespace internal {
 
 namespace {
 
-bool starts_with(const std::string& s, const std::string& p) {
-    return s.size() >= p.size() && std::equal(p.begin(), p.end(), s.begin());
-}
+using mtk::core::utils::starts_with;
 
 bool is_short_count_flag(const std::string& s) {
     if (s.size() < 2 || s[0] != '-') return false;
@@ -49,7 +49,7 @@ std::string filter_log_output(std::string_view raw,
                               std::size_t max_commits,
                               std::size_t header_width,
                               std::size_t max_body_lines) {
-    static const std::string sep = "---END---";
+    const std::string sep(mtk::core::constants::git_log::kCommitSeparator);
 
     std::vector<std::string> commits;
     std::size_t pos = 0;
@@ -174,13 +174,7 @@ std::optional<std::string> detect_status_state(const std::string& line) {
     return std::nullopt;
 }
 
-std::string trim_copy(std::string_view s) {
-    std::size_t i = 0;
-    while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
-    std::size_t j = s.size();
-    while (j > i && std::isspace(static_cast<unsigned char>(s[j - 1]))) --j;
-    return std::string(s.substr(i, j - i));
-}
+using mtk::core::utils::trim_copy;
 
 }  // namespace
 
@@ -358,26 +352,25 @@ std::string compact_diff(std::string_view diff,
 
 namespace {
 
-constexpr const char* kInjectedFormat =
-    "--pretty=format:%h %s (%ar) <%an>%n%b%n---END---";
-
 std::vector<std::string> build_log_argv(const std::vector<std::string>& user_args,
                                         const internal::LogOptions& opts,
                                         std::size_t default_count) {
+    namespace gl = mtk::core::constants::git_log;
     std::vector<std::string> argv = {"git", "log"};
     if (!opts.user_set_count) {
         argv.push_back("-" + std::to_string(default_count));
     }
     if (!opts.user_set_format) {
-        argv.push_back(kInjectedFormat);
+        argv.push_back(gl::kPrettyFormat);
     }
     for (const auto& a : user_args) argv.push_back(a);
     return argv;
 }
 
 int run_log(const std::vector<std::string>& user_args) {
+    namespace lim = mtk::core::limits::git_log;
     auto opts = internal::detect_log_options(user_args);
-    auto argv = build_log_argv(user_args, opts, /*default_count=*/10);
+    auto argv = build_log_argv(user_args, opts, lim::kDefaultCommitCount);
 
     auto captured = mtk::core::exec::capture(argv);
     if (!captured.spawned) {
@@ -390,9 +383,10 @@ int run_log(const std::vector<std::string>& user_args) {
         std::string filtered;
         try {
             filtered = internal::filter_log_output(
-                captured.stdout_data, /*max_commits=*/opts.user_set_count ? 1000 : 10,
-                /*header_width=*/opts.user_set_count ? 120 : 80,
-                /*max_body_lines=*/3);
+                captured.stdout_data,
+                opts.user_set_count ? lim::kUserSetCountCap : lim::kDefaultCommitCount,
+                opts.user_set_count ? lim::kWideHeaderWidth : lim::kDefaultHeaderWidth,
+                lim::kMaxBodyLines);
         } catch (const std::exception& e) {
             std::cerr << "mtk: filter warning: " << e.what() << '\n';
             filtered = captured.stdout_data;

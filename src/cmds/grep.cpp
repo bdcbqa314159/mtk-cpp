@@ -7,6 +7,7 @@
 
 #include "core/exec.hpp"
 #include "core/exit_codes.hpp"
+#include "core/limits.hpp"
 #include "core/utils.hpp"
 
 namespace mtk::cmds::grep {
@@ -15,20 +16,8 @@ namespace internal {
 
 namespace {
 
-std::string to_lower(std::string_view s) {
-    std::string out(s);
-    std::transform(out.begin(), out.end(), out.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
-    return out;
-}
-
-std::string trim_copy(std::string_view s) {
-    std::size_t i = 0;
-    while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
-    std::size_t j = s.size();
-    while (j > i && std::isspace(static_cast<unsigned char>(s[j - 1]))) --j;
-    return std::string(s.substr(i, j - i));
-}
+using mtk::core::utils::to_lower;
+using mtk::core::utils::trim_copy;
 
 }  // namespace
 
@@ -114,7 +103,8 @@ std::string clean_line(std::string_view raw,
 }
 
 std::string compact_path(std::string_view path) {
-    if (path.size() <= 50) return std::string(path);
+    namespace plim = mtk::core::limits::grep;
+    if (path.size() <= plim::kCompactPathThreshold) return std::string(path);
 
     std::vector<std::string> parts;
     std::size_t i = 0;
@@ -127,7 +117,7 @@ std::string compact_path(std::string_view path) {
         parts.emplace_back(path.substr(i, j - i));
         i = j + 1;
     }
-    if (parts.size() <= 3) return std::string(path);
+    if (parts.size() < plim::kCompactPathMinSegments) return std::string(path);
 
     std::ostringstream o;
     o << parts.front() << "/.../" << parts[parts.size() - 2] << "/" << parts.back();
@@ -152,9 +142,7 @@ std::string translate_bre_alternation(std::string_view pattern) {
 
 namespace {
 
-constexpr std::size_t kMaxLineLen = 80;
-constexpr std::size_t kMaxResults = 200;
-constexpr std::size_t kPerFile = 25;
+namespace lim = mtk::core::limits::grep;
 
 struct CliParse {
     std::string pattern;
@@ -251,7 +239,7 @@ int run(const std::vector<std::string>& args) {
     for (const auto& line : raw_lines) {
         auto parsed = internal::parse_match_line(line);
         if (!parsed) continue;
-        auto cleaned = internal::clean_line(parsed->content, kMaxLineLen, cli.pattern);
+        auto cleaned = internal::clean_line(parsed->content, lim::kMaxLineLen, cli.pattern);
         by_file[parsed->file].emplace_back(parsed->line_num, std::move(cleaned));
     }
 
@@ -265,11 +253,11 @@ int run(const std::vector<std::string>& args) {
 
     std::size_t shown = 0;
     for (const auto& [file, matches] : files) {
-        if (shown >= kMaxResults) break;
+        if (shown >= lim::kMaxResults) break;
         auto disp = internal::compact_path(file);
         std::size_t emitted_for_file = 0;
         for (const auto& [ln, content] : matches) {
-            if (shown >= kMaxResults || emitted_for_file >= kPerFile) break;
+            if (shown >= lim::kMaxResults || emitted_for_file >= lim::kPerFile) break;
             out << disp << ':' << ln << ':' << content << '\n';
             ++shown;
             ++emitted_for_file;

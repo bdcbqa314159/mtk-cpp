@@ -5,6 +5,8 @@
 #include <fmt/format.h>
 #include <fstream>
 
+#include "core/limits.hpp"
+
 namespace mtk::core::tee {
 
 namespace {
@@ -25,7 +27,9 @@ std::string slugify(std::string_view cmd) {
         }
     }
     if (out.empty()) out = "cmd";
-    if (out.size() > 40) out.resize(40);
+    if (out.size() > mtk::core::limits::tee::kSlugMaxLen) {
+        out.resize(mtk::core::limits::tee::kSlugMaxLen);
+    }
     return out;
 }
 

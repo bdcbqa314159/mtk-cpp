@@ -58,6 +58,7 @@ set(MTK_CORE_SOURCES
     src/core/toml_filter.cpp
     src/core/diagnostic.cpp
     src/core/exit_codes.cpp
+    src/core/run_context.cpp
 )
 
 set(MTK_CMD_SOURCES
