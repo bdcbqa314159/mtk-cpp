@@ -6,6 +6,7 @@
 #include <unordered_map>
 
 #include "core/exec.hpp"
+#include "core/exit_codes.hpp"
 #include "core/utils.hpp"
 
 namespace mtk::cmds::grep {
@@ -219,8 +220,7 @@ int run(const std::vector<std::string>& args) {
 
     auto captured = run_rg_or_grep(cli);
     if (!captured.spawned) {
-        std::cerr << "mtk: failed to spawn grep/rg: " << captured.spawn_error << '\n';
-        return 127;
+        return mtk::core::exit_codes::report_spawn_failure("grep", captured.spawn_error);
     }
 
     if (internal::has_format_flag(cli.extras)) {

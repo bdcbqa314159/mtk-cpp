@@ -8,6 +8,7 @@
 #include <unordered_map>
 
 #include "core/exec.hpp"
+#include "core/exit_codes.hpp"
 #include "core/utils.hpp"
 
 namespace mtk::cmds::ls {
@@ -288,8 +289,7 @@ int run(const std::vector<std::string>& args) {
 
     auto captured = mtk::core::exec::capture(argv, {{"LC_ALL", "C"}});
     if (!captured.spawned) {
-        std::cerr << "mtk: failed to spawn ls: " << captured.spawn_error << '\n';
-        return 127;
+        return mtk::core::exit_codes::report_spawn_failure("ls", captured.spawn_error);
     }
 
     if (captured.exit_code != 0) {

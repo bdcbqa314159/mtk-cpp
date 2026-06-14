@@ -7,6 +7,7 @@
 #include <string>
 
 #include "core/exec.hpp"
+#include "core/exit_codes.hpp"
 #include "core/tee.hpp"
 #include "core/utils.hpp"
 
@@ -380,8 +381,7 @@ int run_log(const std::vector<std::string>& user_args) {
 
     auto captured = mtk::core::exec::capture(argv);
     if (!captured.spawned) {
-        std::cerr << "mtk: failed to spawn git: " << captured.spawn_error << '\n';
-        return 127;
+        return mtk::core::exit_codes::report_spawn_failure("git", captured.spawn_error);
     }
 
     if (opts.user_set_format) {
@@ -443,8 +443,7 @@ int run_show(const std::vector<std::string>& user_args) {
     sum_argv.insert(sum_argv.end(), user_args.begin(), user_args.end());
     auto sum = mtk::core::exec::capture(sum_argv);
     if (!sum.spawned) {
-        std::cerr << "mtk: failed to spawn git: " << sum.spawn_error << '\n';
-        return 127;
+        return mtk::core::exit_codes::report_spawn_failure("git", sum.spawn_error);
     }
     if (sum.exit_code != 0) {
         if (!sum.stderr_data.empty()) std::cerr << sum.stderr_data;
@@ -501,8 +500,7 @@ int run_diff(const std::vector<std::string>& user_args) {
     stat_argv.insert(stat_argv.end(), args_no_compact.begin(), args_no_compact.end());
     auto stat = mtk::core::exec::capture(stat_argv);
     if (!stat.spawned) {
-        std::cerr << "mtk: failed to spawn git: " << stat.spawn_error << '\n';
-        return 127;
+        return mtk::core::exit_codes::report_spawn_failure("git", stat.spawn_error);
     }
     if (stat.exit_code != 0) {
         std::cout << stat.stdout_data;
@@ -519,8 +517,7 @@ int run_diff(const std::vector<std::string>& user_args) {
     diff_argv.insert(diff_argv.end(), args_no_compact.begin(), args_no_compact.end());
     auto diff = mtk::core::exec::capture(diff_argv);
     if (!diff.spawned) {
-        std::cerr << "mtk: failed to spawn git: " << diff.spawn_error << '\n';
-        return 127;
+        return mtk::core::exit_codes::report_spawn_failure("git", diff.spawn_error);
     }
 
     if (!diff.stdout_data.empty()) {
@@ -572,8 +569,7 @@ int run_status(const std::vector<std::string>& user_args) {
     std::vector<std::string> porcelain_argv = {"git", "status", "--porcelain", "-b"};
     auto porcelain = mtk::core::exec::capture(porcelain_argv);
     if (!porcelain.spawned) {
-        std::cerr << "mtk: failed to spawn git: " << porcelain.spawn_error << '\n';
-        return 127;
+        return mtk::core::exit_codes::report_spawn_failure("git", porcelain.spawn_error);
     }
 
     if (!porcelain.stderr_data.empty() &&
@@ -582,9 +578,15 @@ int run_status(const std::vector<std::string>& user_args) {
         return porcelain.exit_code != 0 ? porcelain.exit_code : 128;
     }
 
-    auto detached = internal::extract_detached_head(plain.stdout_data);
+    // Plain status is only used to surface state/detached-HEAD info that
+    // porcelain collapses. If plain failed to spawn or returned non-zero,
+    // skip those extractions rather than feeding garbage to the parsers.
+    const bool plain_usable = plain.spawned && plain.exit_code == 0;
+    std::string_view plain_view = plain_usable ? plain.stdout_data : std::string_view{};
+
+    auto detached = internal::extract_detached_head(plain_view);
     auto formatted = internal::format_status_output(porcelain.stdout_data, detached);
-    auto state = internal::extract_state_header(plain.stdout_data);
+    auto state = internal::extract_state_header(plain_view);
 
     if (state) std::cout << *state << '\n';
     std::cout << formatted;

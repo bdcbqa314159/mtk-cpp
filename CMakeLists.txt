@@ -56,6 +56,8 @@ set(MTK_CORE_SOURCES
     src/core/tee.cpp
     src/core/config.cpp
     src/core/toml_filter.cpp
+    src/core/diagnostic.cpp
+    src/core/exit_codes.cpp
 )
 
 set(MTK_CMD_SOURCES

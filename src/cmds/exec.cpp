@@ -4,6 +4,7 @@
 
 #include "core/config.hpp"
 #include "core/exec.hpp"
+#include "core/exit_codes.hpp"
 #include "core/tee.hpp"
 #include "core/toml_filter.hpp"
 
@@ -24,8 +25,7 @@ int run(const std::vector<std::string>& args) {
 
     auto captured = mtk::core::exec::capture(args);
     if (!captured.spawned) {
-        std::cerr << "mtk: failed to spawn " << args[0] << ": " << captured.spawn_error << '\n';
-        return 127;
+        return mtk::core::exit_codes::report_spawn_failure(args[0], captured.spawn_error);
     }
 
     const std::string& blob = match->filter_stderr
