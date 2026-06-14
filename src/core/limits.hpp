@@ -62,4 +62,20 @@ namespace fmt {
     inline constexpr std::size_t kHumanMB = 1024 * 1024;
 }  // namespace fmt
 
+// --- subprocess capture bounds (A6) ---
+namespace capture {
+    // Hard cap on total captured stdout+stderr bytes. On overflow the
+    // child is terminated and the outcome is flagged truncated.
+    inline constexpr std::size_t kMaxBytes = 50 * 1024 * 1024;  // 50 MiB
+    // Hard cap on subprocess wall-clock. On timeout the child gets
+    // SIGTERM, waits signal::kGraceMs, then SIGKILL.
+    inline constexpr long kTimeoutMs = 30000;
+}  // namespace capture
+
+// --- signal handling (A11) ---
+namespace signal_ {
+    // Grace period between SIGTERM and SIGKILL when terminating a child.
+    inline constexpr long kGraceMs = 2000;
+}  // namespace signal_
+
 }  // namespace mtk::core::limits

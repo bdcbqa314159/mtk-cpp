@@ -59,6 +59,7 @@ set(MTK_CORE_SOURCES
     src/core/diagnostic.cpp
     src/core/exit_codes.cpp
     src/core/run_context.cpp
+    src/core/signals.cpp
 )
 
 set(MTK_CMD_SOURCES

@@ -20,6 +20,15 @@ struct Ran {
     std::string stdout_data;
     std::string stderr_data;
     int exit_code = 0;
+    // Per A6: capture exceeded `limits::capture::kMaxBytes`; child was
+    // terminated, the buffers above are truncated at the cap.
+    bool truncated = false;
+    // Per A6: capture wall-clock exceeded `limits::capture::kTimeoutMs`;
+    // child was SIGTERM'd then SIGKILL'd after the grace period.
+    bool timed_out = false;
+    // Per A11: child was killed by a signal forwarded from mtk (Ctrl-C,
+    // SIGTERM, etc.). exit_code is set to 128 + signo.
+    int killed_by_signal = 0;
     [[nodiscard]] bool clean() const noexcept { return exit_code == 0; }
 };
 

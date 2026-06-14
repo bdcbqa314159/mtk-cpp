@@ -7,8 +7,11 @@
 #include "cmds/git.hpp"
 #include "cmds/grep.hpp"
 #include "cmds/ls.hpp"
+#include "core/signals.hpp"
 
 int main(int argc, char** argv) {
+    mtk::core::signals::install();
+
     CLI::App app{"mtk — Minimal Token Killer"};
     app.set_version_flag("--version", std::string{"0.1.0"});
     app.allow_extras();
