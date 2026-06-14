@@ -5,6 +5,8 @@
 
 #include "cmds/exec.hpp"
 #include "cmds/git.hpp"
+#include "cmds/grep.hpp"
+#include "cmds/ls.hpp"
 
 int main(int argc, char** argv) {
     CLI::App app{"mtk — Minimal Token Killer"};
@@ -17,6 +19,18 @@ int main(int argc, char** argv) {
     git_cmd->allow_extras();
     git_cmd->callback([&] {
         exit_code = mtk::cmds::git::run(git_cmd->remaining());
+    });
+
+    auto* ls_cmd = app.add_subcommand("ls", "Compact ls -la output");
+    ls_cmd->allow_extras();
+    ls_cmd->callback([&] {
+        exit_code = mtk::cmds::ls::run(ls_cmd->remaining());
+    });
+
+    auto* grep_cmd = app.add_subcommand("grep", "Grouped grep/rg results");
+    grep_cmd->allow_extras();
+    grep_cmd->callback([&] {
+        exit_code = mtk::cmds::grep::run(grep_cmd->remaining());
     });
 
     auto* exec_cmd = app.add_subcommand("exec", "Run any command (TOML filter or passthrough)");

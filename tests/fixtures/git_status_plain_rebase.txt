@@ -1,0 +1,15 @@
+interactive rebase in progress; onto abc1234
+Last command done (1 command done):
+   pick def5678 Refactor exec wrapper
+Next command to do (2 remaining commands):
+   pick 9988aaa Add status filter
+   pick fed4321 Add diff filter
+You are currently editing a commit while rebasing branch 'feature/git-filters' on 'abc1234'.
+  (use "git commit --amend" to amend the current commit)
+  (use "git rebase --continue" once you are satisfied with your changes)
+
+Changes to be committed:
+	modified:   src/cmds/git.cpp
+
+Untracked files:
+	notes/scratch.md

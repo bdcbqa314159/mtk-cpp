@@ -12,7 +12,10 @@ struct CapturedOutput {
     std::string spawn_error;
 };
 
-CapturedOutput capture(const std::vector<std::string>& argv);
+using EnvExtra = std::vector<std::pair<std::string, std::string>>;
+
+CapturedOutput capture(const std::vector<std::string>& argv,
+                       const EnvExtra& env_extra = {});
 
 int passthrough(const std::vector<std::string>& argv);
 

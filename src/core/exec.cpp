@@ -5,7 +5,8 @@
 
 namespace mtk::core::exec {
 
-CapturedOutput capture(const std::vector<std::string>& argv) {
+CapturedOutput capture(const std::vector<std::string>& argv,
+                       const EnvExtra& env_extra) {
     CapturedOutput out;
     if (argv.empty()) {
         out.spawn_error = "empty argv";
@@ -17,6 +18,11 @@ CapturedOutput capture(const std::vector<std::string>& argv) {
     opts.redirect.in.type = reproc::redirect::type::discard;
     opts.redirect.out.type = reproc::redirect::type::pipe;
     opts.redirect.err.type = reproc::redirect::type::pipe;
+
+    if (!env_extra.empty()) {
+        opts.env.behavior = reproc::env::extend;
+        opts.env.extra = env_extra;
+    }
 
     if (auto ec = proc.start(argv, opts)) {
         out.spawn_error = ec.message();

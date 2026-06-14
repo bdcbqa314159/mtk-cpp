@@ -1,0 +1,53 @@
+diff --git a/src/core/exec.cpp b/src/core/exec.cpp
+index 1234567..89abcde 100644
+--- a/src/core/exec.cpp
++++ b/src/core/exec.cpp
+@@ -10,7 +10,7 @@ CapturedOutput capture(const std::vector<std::string>& argv) {
+     reproc::options opts;
+     opts.redirect.in.type = reproc::redirect::type::discard;
+     opts.redirect.out.type = reproc::redirect::type::pipe;
+-    opts.redirect.err.type = reproc::redirect::type::pipe;
++    opts.redirect.err.type = reproc::redirect::type::pipe;  // capture stderr
+
+     if (auto ec = proc.start(argv, opts)) {
+         out.spawn_error = ec.message();
+diff --git a/src/cmds/git.cpp b/src/cmds/git.cpp
+index abc1234..def5678 100644
+--- a/src/cmds/git.cpp
++++ b/src/cmds/git.cpp
+@@ -50,6 +50,12 @@ namespace internal {
+
+ namespace {
+
++bool any_arg_equals(const std::vector<std::string>& args, std::string_view target) {
++    for (const auto& a : args) {
++        if (a == target) return true;
++    }
++    return false;
++}
++
+ bool starts_with(const std::string& s, const std::string& p) {
+     return s.size() >= p.size() && std::equal(p.begin(), p.end(), s.begin());
+ }
+@@ -120,8 +126,9 @@ std::string filter_log_output(std::string_view raw,
+         auto lines = mtk::core::utils::split_lines(chunk);
+         while (!lines.empty() && lines.front().empty()) lines.erase(lines.begin());
+         if (lines.empty()) continue;
+-
++        // Capture commit-level metadata before processing the body
+         std::ostringstream commit;
++        // Headline only
+         commit << mtk::core::utils::truncate(lines.front(), header_width);
+
+         std::size_t body_emitted = 0;
+diff --git a/src/cmds/exec.cpp b/src/cmds/exec.cpp
+index 0011223..3344556 100644
+--- a/src/cmds/exec.cpp
++++ b/src/cmds/exec.cpp
+@@ -25,5 +25,7 @@ int run(const std::vector<std::string>& args) {
+         return mtk::core::exec::passthrough(args);
+     }
+
++    // Telemetry: none. By construction.
++
+     auto captured = mtk::core::exec::capture(args);

@@ -1,0 +1,13 @@
+total 96
+drwxr-xr-x  10 user  staff    320 Jun 14 09:00 .
+drwxr-xr-x  30 user  staff    960 Jun 14 09:00 ..
+drwxr-xr-x   8 user  staff    256 Jun 14 09:00 .git
+-rw-r--r--   1 user  staff   1234 Jun 14 09:00 .gitignore
+drwxr-xr-x  12 user  staff    384 Jun 14 09:00 node_modules
+drwxr-xr-x   4 user  staff    128 Jun 14 09:00 src
+drwxr-xr-x   3 user  staff     96 Jun 14 09:00 tests
+-rw-r--r--   1 user  staff   2048 Jun 14 09:00 CMakeLists.txt
+-rw-r--r--   1 user  staff   8192 Jun 14 09:00 INSTALL.md
+-rw-r--r--   1 user  staff   1048576 Jun 14 09:00 build.log
+-rwxr-xr-x   1 user  staff    500 Jun 14 09:00 build.sh
+lrwxr-xr-x   1 user  staff     12 Jun 14 09:00 link -> ../target

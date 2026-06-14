@@ -1,0 +1,6 @@
+## main...origin/main [ahead 2]
+ M src/core/exec.cpp
+ M src/cmds/git.cpp
+A  src/cmds/git_status.cpp
+?? .mtk/
+?? notes/scratch.md

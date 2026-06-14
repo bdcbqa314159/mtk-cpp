@@ -1,6 +1,10 @@
 add_executable(mtk_tests
     test_main.cpp
     test_git_log.cpp
+    test_git_status.cpp
+    test_git_diff.cpp
+    test_ls.cpp
+    test_grep.cpp
     test_toml_filter.cpp
     test_utils.cpp
 )
