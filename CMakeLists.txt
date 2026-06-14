@@ -60,6 +60,10 @@ set(MTK_CORE_SOURCES
     src/core/exit_codes.cpp
     src/core/run_context.cpp
     src/core/signals.cpp
+    src/core/registry.cpp
+    src/core/passthrough_filter.cpp
+    src/core/toml_filter_adapter.cpp
+    src/core/default_registry.cpp
 )
 
 set(MTK_CMD_SOURCES

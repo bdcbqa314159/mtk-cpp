@@ -2,55 +2,37 @@
 
 #include <iostream>
 
-#include "core/config.hpp"
-#include "core/exec.hpp"
+#include "core/default_registry.hpp"
 #include "core/exit_codes.hpp"
+#include "core/registry.hpp"
 #include "core/run_context.hpp"
-#include "core/toml_filter.hpp"
 
 namespace mtk::cmds::exec {
 
+// Phase 1.5 (1/2): registry-driven dispatch for the catch-all path.
+// Loads the default registry (TOML filters + Passthrough), finds the
+// matching filter (always at least Passthrough), runs it, emits.
+//
+// Phase 1.5 (2/2) will move git/ls/grep into the same registry, and
+// main.cpp's CLI11 subcommand dispatch will collapse into a single
+// loop calling this function with the full argv.
 int run(const std::vector<std::string>& args) {
     if (args.empty()) {
         std::cerr << "mtk exec: no command given\n";
         return mtk::core::exit_codes::kUsage;
     }
 
-    auto filters = mtk::core::config::load_all_filters();
-    auto match = mtk::core::config::find_filter_for(args[0], filters);
+    auto reg = mtk::core::build_default_registry();
+    auto match = reg.find(args);
+    if (!match.filter) {
+        // Unreachable — Passthrough always matches. Defensive return.
+        std::cerr << "mtk exec: no filter matched (registry misconfigured)\n";
+        return mtk::core::exit_codes::kNotFound;
+    }
 
     mtk::core::RunContext ctx;
-    if (!match) {
-        return ctx.passthrough(args);
-    }
-
-    auto outcome = ctx.capture(args);
-    const auto* ran = ctx.as_ran(outcome);
-    if (!ran) {
-        return ctx.report_spawn_failure(outcome, args[0]);
-    }
-
-    const std::string blob = match->filter_stderr
-        ? (ran->stdout_data + ran->stderr_data)
-        : ran->stdout_data;
-
-    std::string filtered;
-    try {
-        filtered = mtk::core::toml_filter::apply(*match, blob);
-    } catch (const std::exception& e) {
-        std::cerr << "mtk exec: filter warning [" << match->name << "]: " << e.what() << '\n';
-        filtered = blob;
-    }
-
-    std::cout << filtered;
-    if (!filtered.empty() && filtered.back() != '\n') std::cout << '\n';
-
-    if (!match->filter_stderr && !ran->stderr_data.empty()) {
-        std::cerr << ran->stderr_data;
-    }
-
-    ctx.tee_on_failure(outcome, args[0]);
-    return ran->exit_code;
+    auto outcome = match.filter->run(std::move(match.token), args, ctx);
+    return ctx.emit(std::move(outcome), match.filter->name());
 }
 
 }  // namespace mtk::cmds::exec
