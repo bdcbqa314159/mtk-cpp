@@ -49,7 +49,7 @@ configure_file(
 )
 
 # ---------- submodule sanity check ----------
-foreach(dep CLI11 tomlplusplus reproc fmt doctest)
+foreach(dep CLI11 tomlplusplus reproc fmt doctest json)
     if(NOT EXISTS "${CMAKE_SOURCE_DIR}/third_party/${dep}/CMakeLists.txt")
         message(FATAL_ERROR
             "third_party/${dep}/ is empty or missing CMakeLists.txt — "
@@ -93,6 +93,14 @@ set(DOCTEST_WITH_MAIN_IN_STATIC_LIB OFF CACHE BOOL "" FORCE)
 set(DOCTEST_NO_INSTALL ON CACHE BOOL "" FORCE)
 add_subdirectory(third_party/doctest EXCLUDE_FROM_ALL)
 
+# nlohmann/json (header-only target: nlohmann_json::nlohmann_json).
+# Used only by cmds/hook.cpp for Copilot integration; the heavy compile
+# cost is contained to that one TU.
+set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+set(JSON_Install OFF CACHE BOOL "" FORCE)
+set(JSON_MultipleHeaders OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/json EXCLUDE_FROM_ALL)
+
 # ---------- mtk core ----------
 set(MTK_CORE_SOURCES
     src/core/exec.cpp
@@ -115,6 +123,7 @@ set(MTK_CMD_SOURCES
     src/cmds/git.cpp
     src/cmds/ls.cpp
     src/cmds/grep.cpp
+    src/cmds/hook.cpp
 )
 
 add_library(mtk_lib STATIC ${MTK_CORE_SOURCES} ${MTK_CMD_SOURCES})
@@ -128,6 +137,7 @@ target_link_libraries(mtk_lib
         reproc++
         tomlplusplus::tomlplusplus
         fmt::fmt
+        nlohmann_json::nlohmann_json
 )
 
 add_executable(mtk src/main.cpp)

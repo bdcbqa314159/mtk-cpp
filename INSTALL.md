@@ -37,6 +37,7 @@ dependency on a machine that can, then drop the contents into the matching
 | reproc         | https://github.com/DaanDeMeyer/reproc                 | `third_party/reproc/`       |
 | fmt            | https://github.com/fmtlib/fmt                         | `third_party/fmt/`          |
 | doctest        | https://github.com/doctest/doctest                    | `third_party/doctest/`      |
+| nlohmann/json  | https://github.com/nlohmann/json                      | `third_party/json/`         |
 
 Each directory must contain the upstream `CMakeLists.txt` at its root
 (i.e. `third_party/fmt/CMakeLists.txt` exists, not
