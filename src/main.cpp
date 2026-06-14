@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -23,6 +24,8 @@ void print_help() {
         << "  mtk <command> [args...]         Run command through registry dispatch\n"
         << "  mtk exec <command> [args...]    Same (alias)\n"
         << "  mtk explain <command> [args...] Show which filter would match (dry-run)\n"
+        << "  mtk rewrite <command> [args...] Emit wrapped form if a filter matches\n"
+        << "  mtk init <agent>                Install agent hooks (claude / list)\n"
         << "  mtk trust [path]                Allow .mtk/filters/ at <path> (default: cwd)\n"
         << "  mtk untrust [path]              Remove <path> from allow-list\n"
         << "  mtk trusted                     List trusted paths\n"
@@ -119,6 +122,134 @@ int run_trusted() {
     return 0;
 }
 
+// Per Phase 2 (2/2): companion to mtk init. Hook scripts call
+// `mtk rewrite <cmd>` to decide whether to wrap the command in mtk. If a
+// non-passthrough filter would match, emit `mtk <cmd>`. Otherwise echo
+// the original — no point routing pure passthroughs through us.
+int run_rewrite(const std::vector<std::string>& argv) {
+    if (argv.empty()) {
+        std::cerr << "mtk rewrite: no command given\n";
+        return mtk::core::exit_codes::kUsage;
+    }
+    auto reg = mtk::core::build_default_registry();
+    auto match = reg.find(argv);
+    bool useful_match = match.filter &&
+        match.filter->name() != std::string_view("_passthrough");
+
+    if (useful_match) std::cout << "mtk ";
+    for (std::size_t i = 0; i < argv.size(); ++i) {
+        if (i > 0) std::cout << ' ';
+        std::cout << argv[i];
+    }
+    std::cout << '\n';
+    return 0;
+}
+
+// Per Phase 2 (2/2): write agent-hook integration. Today: claude only.
+// Others (copilot/gemini/codex/cursor) get TODO notes — each has a
+// different hook protocol and we don't write configs blind.
+int run_init_claude() {
+    const char* home = std::getenv("HOME");
+    if (!home) {
+        std::cerr << "mtk init: $HOME not set\n";
+        return mtk::core::exit_codes::kUsage;
+    }
+    std::filesystem::path claude_dir = std::filesystem::path(home) / ".claude";
+    std::filesystem::path hooks_dir = claude_dir / "hooks";
+    std::filesystem::path hook_script = hooks_dir / "mtk-rewrite.sh";
+
+    std::error_code ec;
+    std::filesystem::create_directories(hooks_dir, ec);
+    if (ec) {
+        std::cerr << "mtk init: failed to create " << hooks_dir << ": "
+                  << ec.message() << '\n';
+        return mtk::core::exit_codes::kNotFound;
+    }
+
+    constexpr const char* kHookBody = R"(#!/usr/bin/env bash
+# mtk-rewrite.sh — Claude Code PreToolUse hook (Bash tool only).
+# Reads tool input JSON from stdin, rewrites Bash commands through mtk,
+# writes modified JSON to stdout. Requires `jq` and `mtk` on PATH.
+set -euo pipefail
+
+input=$(cat)
+tool_name=$(printf '%s' "$input" | jq -r '.tool_name // empty')
+if [[ "$tool_name" != "Bash" ]]; then
+    printf '%s' "$input"
+    exit 0
+fi
+
+cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
+if [[ -z "$cmd" ]]; then
+    printf '%s' "$input"
+    exit 0
+fi
+
+# mtk rewrite emits either "mtk <cmd>" (wrap) or "<cmd>" (passthrough).
+rewritten=$(printf '%s' "$cmd" | xargs -0 -I{} mtk rewrite {} 2>/dev/null \
+            || printf '%s' "$cmd")
+printf '%s' "$input" | jq --arg c "$rewritten" '.tool_input.command = $c'
+)";
+
+    std::ofstream f(hook_script);
+    if (!f) {
+        std::cerr << "mtk init: failed to write " << hook_script << '\n';
+        return mtk::core::exit_codes::kNotFound;
+    }
+    f << kHookBody;
+    f.close();
+    std::filesystem::permissions(hook_script,
+        std::filesystem::perms::owner_read |
+        std::filesystem::perms::owner_write |
+        std::filesystem::perms::owner_exec |
+        std::filesystem::perms::group_read |
+        std::filesystem::perms::group_exec |
+        std::filesystem::perms::others_read |
+        std::filesystem::perms::others_exec,
+        std::filesystem::perm_options::replace, ec);
+
+    std::cout << "Wrote " << hook_script << " (chmod 755)\n"
+              << "\n"
+              << "Manual step — add to ~/.claude/settings.json (under \"hooks\"):\n"
+              << "\n"
+              << "  \"PreToolUse\": [\n"
+              << "    {\n"
+              << "      \"matcher\": \"Bash\",\n"
+              << "      \"hooks\": [\n"
+              << "        {\n"
+              << "          \"type\": \"command\",\n"
+              << "          \"command\": \"" << hook_script.string() << "\"\n"
+              << "        }\n"
+              << "      ]\n"
+              << "    }\n"
+              << "  ]\n"
+              << "\n"
+              << "Requires `jq` and `mtk` on PATH.\n";
+    return 0;
+}
+
+int run_init(const std::vector<std::string>& argv) {
+    if (argv.empty()) {
+        std::cout
+            << "mtk init <agent>\n"
+            << "\n"
+            << "Agents:\n"
+            << "  claude    — Claude Code (claude.ai/code) — IMPLEMENTED\n"
+            << "  copilot   — GitHub Copilot CLI — TODO (different hook protocol)\n"
+            << "  gemini    — Gemini CLI — TODO\n"
+            << "  codex     — OpenAI Codex CLI — TODO\n"
+            << "  cursor    — Cursor IDE — TODO\n"
+            << "\n"
+            << "Example: mtk init claude\n";
+        return 0;
+    }
+    const auto& agent = argv[0];
+    if (agent == "claude") return run_init_claude();
+    std::cerr << "mtk init: agent '" << agent
+              << "' not yet supported. Run `mtk init` for the list.\n";
+    return mtk::core::exit_codes::kUsage;
+}
+
 int dispatch(const std::vector<std::string>& argv) {
     auto reg = mtk::core::build_default_registry();
     auto match = reg.find(argv);
@@ -166,6 +297,12 @@ int main(int argc, char** argv) {
     }
     if (args[0] == "trusted") {
         return run_trusted();
+    }
+    if (args[0] == "rewrite") {
+        return run_rewrite(std::vector<std::string>(args.begin() + 1, args.end()));
+    }
+    if (args[0] == "init") {
+        return run_init(std::vector<std::string>(args.begin() + 1, args.end()));
     }
 
     // Optional `exec` prefix for backward-compat: `mtk exec X` == `mtk X`.
