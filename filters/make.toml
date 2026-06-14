@@ -1,0 +1,38 @@
+# Example TOML filter — drop in to ~/.config/mtk/filters/ or .mtk/filters/
+# Each filter is a [filters.<name>] table.
+# match_command is a regex matched against argv[0] of the wrapped command.
+
+[filters.make]
+description = "Compress make build output — keep warnings/errors, drop chatter"
+match_command = "^make$"
+strip_ansi = true
+strip_lines_matching = [
+    "^make\\[",            # entering/leaving subdirs
+    "^Entering directory",
+    "^Leaving directory",
+    "^\\s*CC\\s",          # compile lines (libtool style)
+    "^\\s*LD\\s",          # link lines
+]
+keep_lines_matching = [
+    "error",
+    "Error",
+    "warning",
+    "Warning",
+    "undefined reference",
+]
+truncate_lines_at = 240
+max_lines = 80
+on_empty = "[mtk: make succeeded — no errors or warnings]"
+
+[filters.cmake]
+description = "Compress cmake configure output"
+match_command = "^cmake$"
+strip_lines_matching = [
+    "^-- Check",
+    "^-- Found",
+    "^-- Looking for",
+    "^-- Performing Test",
+]
+truncate_lines_at = 200
+max_lines = 60
+on_empty = "[mtk: cmake configured cleanly]"

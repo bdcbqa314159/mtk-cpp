@@ -1,0 +1,54 @@
+abc1234 Add retry logic to upstream sync job (2 hours ago) <Alice Quant>
+This change introduces an exponential backoff retry policy for the
+upstream sync job. Previously, transient 5xx responses from the
+provider would cause the whole pipeline to abort and require a manual
+restart, which was eating into our oncall budget.
+
+The retry is capped at 5 attempts with a 30s ceiling per wait.
+Anything beyond that should be treated as a hard failure and paged.
+
+We also added a small jitter term to avoid the classic thundering
+herd if the provider blips and all our shards retry in lockstep.
+
+Closes #481.
+
+Signed-off-by: Alice Quant <alice@example.com>
+Co-authored-by: Bob Builder <bob@example.com>
+---END---
+def5678 Fix off-by-one in window aggregation (yesterday) <Bob Builder>
+The bucket boundary was being computed as floor(t / w) * w, but the
+left edge of the bucket should be exclusive when t lands exactly on
+the boundary. This caused a one-bucket lag in the 1-minute window
+that surfaced during the post-mortem of the April 3 incident.
+
+Switched to ceil((t + 1) / w) * w - w so the edges line up with how
+downstream consumers slice the series.
+
+Added a regression test fixture from the recorded production trace.
+
+Signed-off-by: Bob Builder <bob@example.com>
+---END---
+9988aaa Bump build pins (3 days ago) <Cynthia Lee>
+Routine dependency refresh — no behaviour change.
+---END---
+fed4321 Drop deprecated --legacy-format flag (4 days ago) <Dan Refactor>
+The --legacy-format flag has been emitting a warning since 0.18 and
+shipped in deprecation mode for two minor versions. Removing it now
+so we can stop carrying the compatibility shim in the parser.
+
+If anyone is still relying on it, the suggested replacement is
+--format=legacy.json which produces identical output structure.
+
+Signed-off-by: Dan Refactor <dan@example.com>
+---END---
+0123456 Tighten input validation on /ingest endpoint (5 days ago) <Eve Security>
+Reject payloads exceeding 4 MiB at the edge rather than at the worker
+to avoid the memory spike we saw during the synthetic load test on
+Tuesday. The worker still keeps its own check as a defence-in-depth
+backstop.
+
+Returns 413 with a structured error body so clients can distinguish
+"too large" from "malformed".
+
+Signed-off-by: Eve Security <eve@example.com>
+---END---

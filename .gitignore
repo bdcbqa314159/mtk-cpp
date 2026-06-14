@@ -1,0 +1,45 @@
+# Build (root + nested under third_party/)
+build/
+**/build/
+build-*/
+out/
+cmake-build-*/
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# vcpkg
+vcpkg_installed/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.cache/
+.ccls-cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artefacts
+Testing/
+*.gcov
+*.gcda
+*.gcno
+coverage/
+
+# Local data
+*.log
+.mtk_local/
