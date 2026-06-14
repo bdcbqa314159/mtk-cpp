@@ -8,6 +8,7 @@
 #include "core/exec.hpp"
 #include "core/exit_codes.hpp"
 #include "core/limits.hpp"
+#include "core/run_context.hpp"
 #include "core/utils.hpp"
 
 namespace mtk::cmds::grep {
@@ -181,20 +182,21 @@ CliParse split_cli(const std::vector<std::string>& args) {
     return r;
 }
 
-mtk::core::exec::CapturedOutput run_rg_or_grep(const CliParse& cli) {
+std::vector<std::string> build_rg_argv(const CliParse& cli) {
     std::string rg_pat = internal::translate_bre_alternation(cli.pattern);
-    std::vector<std::string> rg_argv = {"rg", "-n", "-H", "--null", "--no-heading",
-                                        "--no-ignore-vcs", rg_pat, cli.path};
+    std::vector<std::string> argv = {"rg", "-n", "-H", "--null", "--no-heading",
+                                     "--no-ignore-vcs", rg_pat, cli.path};
     for (const auto& e : cli.extras) {
         if (e == "-r" || e == "--recursive") continue;
-        rg_argv.push_back(e);
+        argv.push_back(e);
     }
-    auto out = mtk::core::exec::capture(rg_argv);
-    if (out.spawned) return out;
+    return argv;
+}
 
-    std::vector<std::string> grep_argv = {"grep", "-rnH", cli.pattern, cli.path};
-    for (const auto& e : cli.extras) grep_argv.push_back(e);
-    return mtk::core::exec::capture(grep_argv);
+std::vector<std::string> build_grep_argv(const CliParse& cli) {
+    std::vector<std::string> argv = {"grep", "-rnH", cli.pattern, cli.path};
+    for (const auto& e : cli.extras) argv.push_back(e);
+    return argv;
 }
 
 }  // namespace
@@ -203,36 +205,40 @@ int run(const std::vector<std::string>& args) {
     auto cli = split_cli(args);
     if (!cli.ok) {
         std::cerr << "mtk grep: missing pattern\n";
-        return 2;
+        return mtk::core::exit_codes::kUsage;
     }
 
-    auto captured = run_rg_or_grep(cli);
-    if (!captured.spawned) {
-        return mtk::core::exit_codes::report_spawn_failure("grep", captured.spawn_error);
+    mtk::core::RunContext ctx;
+    auto outcome = ctx.capture(build_rg_argv(cli));
+    if (ctx.is_spawn_failed(outcome)) {
+        // rg not on PATH — try POSIX grep as fallback.
+        outcome = ctx.capture(build_grep_argv(cli));
     }
+    const auto* ran = ctx.as_ran(outcome);
+    if (!ran) return ctx.report_spawn_failure(outcome, "grep");
 
     if (internal::has_format_flag(cli.extras)) {
-        std::cout << captured.stdout_data;
-        if (!captured.stderr_data.empty()) std::cerr << captured.stderr_data;
-        return captured.exit_code;
+        std::cout << ran->stdout_data;
+        if (!ran->stderr_data.empty()) std::cerr << ran->stderr_data;
+        return ran->exit_code;
     }
 
     bool stdout_empty = true;
-    for (char c : captured.stdout_data) {
+    for (char c : ran->stdout_data) {
         if (!std::isspace(static_cast<unsigned char>(c))) {
             stdout_empty = false;
             break;
         }
     }
     if (stdout_empty) {
-        if (captured.exit_code == 2 && !captured.stderr_data.empty()) {
-            std::cerr << captured.stderr_data;
+        if (ran->exit_code == 2 && !ran->stderr_data.empty()) {
+            std::cerr << ran->stderr_data;
         }
         std::cout << "0 matches for '" << cli.pattern << "'\n";
-        return captured.exit_code;
+        return ran->exit_code;
     }
 
-    auto raw_lines = mtk::core::utils::split_lines(captured.stdout_data);
+    auto raw_lines = mtk::core::utils::split_lines(ran->stdout_data);
     std::size_t total_matches = raw_lines.size();
 
     std::unordered_map<std::string, std::vector<std::pair<std::size_t, std::string>>> by_file;
@@ -269,7 +275,7 @@ int run(const std::vector<std::string>& args) {
     }
 
     std::cout << out.str();
-    return captured.exit_code;
+    return ran->exit_code;
 }
 
 }  // namespace mtk::cmds::grep

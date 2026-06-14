@@ -12,8 +12,8 @@ namespace {
 
 // Returns true if argv[0] is plausibly resolvable: either it contains a
 // path separator (let exec try) or it's findable on PATH. False only when
-// PATH was checked exhaustively and the binary isn't there. This lets us
-// surface "command not found" before we fork.
+// PATH was checked exhaustively and the binary isn't there. Surfaces
+// "command not found" before we fork — see A3's PATH pre-resolution.
 bool resolvable_command(std::string_view cmd) noexcept {
     if (cmd.empty()) return false;
     if (cmd.find('/') != std::string_view::npos) return true;
@@ -38,50 +38,6 @@ bool resolvable_command(std::string_view cmd) noexcept {
 }
 
 }  // namespace
-
-}  // namespace mtk::core::exec
-
-namespace mtk::core::exec {
-
-CapturedOutput capture(const std::vector<std::string>& argv,
-                       const EnvExtra& env_extra) {
-    CapturedOutput out;
-    if (argv.empty()) {
-        out.spawn_error = "empty argv";
-        return out;
-    }
-    if (!resolvable_command(argv[0])) {
-        out.spawn_error = "command not found in PATH: " + argv[0];
-        out.exit_code = 127;
-        return out;
-    }
-
-    reproc::process proc;
-    reproc::options opts;
-    opts.redirect.in.type = reproc::redirect::type::discard;
-    opts.redirect.out.type = reproc::redirect::type::pipe;
-    opts.redirect.err.type = reproc::redirect::type::pipe;
-
-    if (!env_extra.empty()) {
-        opts.env.behavior = reproc::env::extend;
-        opts.env.extra = env_extra;
-    }
-
-    if (auto ec = proc.start(argv, opts)) {
-        out.spawn_error = ec.message();
-        out.exit_code = 127;
-        return out;
-    }
-    out.spawned = true;
-
-    reproc::sink::string out_sink(out.stdout_data);
-    reproc::sink::string err_sink(out.stderr_data);
-    (void)reproc::drain(proc, out_sink, err_sink);
-
-    auto [status, _wait_ec] = proc.wait(reproc::infinite);
-    out.exit_code = status;
-    return out;
-}
 
 int passthrough(const std::vector<std::string>& argv) {
     if (argv.empty()) return 127;
@@ -135,12 +91,10 @@ ExecOutcome capture_outcome(const std::vector<std::string>& argv,
     auto [status, _wait_ec] = proc.wait(reproc::infinite);
     ran.exit_code = status;
 
-    // Heuristic for "child's execvp failed": reproc only surfaces fork-time
-    // errors via proc.start()'s error_code. If exec inside the child fails,
-    // the child immediately exits 127 with no output. macOS/Linux shell
-    // convention uses exit 127 for command-not-found. We coerce that case
-    // to SpawnFailed so callers can route it through the diagnostic path
-    // rather than treating it as a legitimate failed run.
+    // Fallback for the case PATH resolution can't catch: fork succeeded but
+    // execvp inside the child failed silently (e.g., race conditions with
+    // PATH changes between resolve and exec, exec-bit missing, ENOEXEC).
+    // The child immediately exits 127 with no output in this case.
     if (ran.exit_code == 127 && ran.stdout_data.empty() && ran.stderr_data.empty()) {
         return SpawnFailed{"command not found in PATH: " + argv[0]};
     }

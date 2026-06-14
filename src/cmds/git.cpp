@@ -10,6 +10,7 @@
 #include "core/exec.hpp"
 #include "core/exit_codes.hpp"
 #include "core/limits.hpp"
+#include "core/run_context.hpp"
 #include "core/tee.hpp"
 #include "core/utils.hpp"
 
@@ -372,37 +373,34 @@ int run_log(const std::vector<std::string>& user_args) {
     auto opts = internal::detect_log_options(user_args);
     auto argv = build_log_argv(user_args, opts, lim::kDefaultCommitCount);
 
-    auto captured = mtk::core::exec::capture(argv);
-    if (!captured.spawned) {
-        return mtk::core::exit_codes::report_spawn_failure("git", captured.spawn_error);
-    }
+    mtk::core::RunContext ctx;
+    auto outcome = ctx.capture(argv);
+    const auto* ran = ctx.as_ran(outcome);
+    if (!ran) return ctx.report_spawn_failure(outcome, "git");
 
     if (opts.user_set_format) {
-        std::cout << captured.stdout_data;
+        std::cout << ran->stdout_data;
     } else {
         std::string filtered;
         try {
             filtered = internal::filter_log_output(
-                captured.stdout_data,
+                ran->stdout_data,
                 opts.user_set_count ? lim::kUserSetCountCap : lim::kDefaultCommitCount,
                 opts.user_set_count ? lim::kWideHeaderWidth : lim::kDefaultHeaderWidth,
                 lim::kMaxBodyLines);
         } catch (const std::exception& e) {
-            std::cerr << "mtk: filter warning: " << e.what() << '\n';
-            filtered = captured.stdout_data;
+            std::cerr << "mtk git: filter warning: " << e.what() << '\n';
+            filtered = ran->stdout_data;
         }
         std::cout << filtered;
         if (!filtered.empty() && filtered.back() != '\n') std::cout << '\n';
     }
 
-    if (captured.exit_code != 0) {
-        if (auto hint = mtk::core::tee::tee_and_hint(captured.stdout_data, "git_log",
-                                                    captured.exit_code)) {
-            std::cerr << *hint << '\n';
-        }
-        if (!captured.stderr_data.empty()) std::cerr << captured.stderr_data;
+    if (!ran->clean()) {
+        ctx.tee_on_failure(outcome, "git_log");
+        if (!ran->stderr_data.empty()) std::cerr << ran->stderr_data;
     }
-    return captured.exit_code;
+    return ran->exit_code;
 }
 
 bool is_blob_show_arg(const std::string& a) {
@@ -419,48 +417,49 @@ int run_show(const std::vector<std::string>& user_args) {
         if (is_blob_show_arg(a)) wants_blob = true;
     }
 
+    mtk::core::RunContext ctx;
+
     if (wants_stat_only || wants_format || wants_blob) {
         std::vector<std::string> argv = {"git", "show"};
         argv.insert(argv.end(), user_args.begin(), user_args.end());
-        auto captured = mtk::core::exec::capture(argv);
-        if (!captured.spawned) {
-            std::cerr << "mtk: failed to spawn git: " << captured.spawn_error << '\n';
-            return 127;
-        }
-        std::cout << captured.stdout_data;
-        if (!captured.stderr_data.empty()) std::cerr << captured.stderr_data;
-        return captured.exit_code;
+        auto outcome = ctx.capture(argv);
+        const auto* ran = ctx.as_ran(outcome);
+        if (!ran) return ctx.report_spawn_failure(outcome, "git");
+        std::cout << ran->stdout_data;
+        if (!ran->stderr_data.empty()) std::cerr << ran->stderr_data;
+        return ran->exit_code;
     }
 
     std::vector<std::string> sum_argv = {"git", "show", "--no-patch",
                                          "--pretty=format:%h %s (%ar) <%an>"};
     sum_argv.insert(sum_argv.end(), user_args.begin(), user_args.end());
-    auto sum = mtk::core::exec::capture(sum_argv);
-    if (!sum.spawned) {
-        return mtk::core::exit_codes::report_spawn_failure("git", sum.spawn_error);
+    auto sum_out = ctx.capture(sum_argv);
+    const auto* sum = ctx.as_ran(sum_out);
+    if (!sum) return ctx.report_spawn_failure(sum_out, "git");
+    if (!sum->clean()) {
+        if (!sum->stderr_data.empty()) std::cerr << sum->stderr_data;
+        return sum->exit_code;
     }
-    if (sum.exit_code != 0) {
-        if (!sum.stderr_data.empty()) std::cerr << sum.stderr_data;
-        return sum.exit_code;
-    }
-    std::cout << sum.stdout_data;
-    if (!sum.stdout_data.empty() && sum.stdout_data.back() != '\n') std::cout << '\n';
+    std::cout << sum->stdout_data;
+    if (!sum->stdout_data.empty() && sum->stdout_data.back() != '\n') std::cout << '\n';
 
     std::vector<std::string> stat_argv = {"git", "show", "--stat", "--pretty=format:"};
     stat_argv.insert(stat_argv.end(), user_args.begin(), user_args.end());
-    auto stat = mtk::core::exec::capture(stat_argv);
-    if (!stat.stdout_data.empty()) std::cout << stat.stdout_data;
+    auto stat_out = ctx.capture(stat_argv);
+    if (const auto* stat = ctx.as_ran(stat_out); stat && !stat->stdout_data.empty()) {
+        std::cout << stat->stdout_data;
+    }
 
     std::vector<std::string> diff_argv = {"git", "show", "--pretty=format:"};
     diff_argv.insert(diff_argv.end(), user_args.begin(), user_args.end());
-    auto diff = mtk::core::exec::capture(diff_argv);
-    if (!diff.stdout_data.empty()) {
+    auto diff_out = ctx.capture(diff_argv);
+    if (const auto* diff = ctx.as_ran(diff_out); diff && !diff->stdout_data.empty()) {
         std::string compacted;
         try {
-            compacted = internal::compact_diff(diff.stdout_data);
+            compacted = internal::compact_diff(diff->stdout_data);
         } catch (const std::exception& e) {
-            std::cerr << "mtk: filter warning: " << e.what() << '\n';
-            compacted = diff.stdout_data;
+            std::cerr << "mtk git: filter warning: " << e.what() << '\n';
+            compacted = diff->stdout_data;
         }
         std::cout << compacted;
         if (!compacted.empty() && compacted.back() != '\n') std::cout << '\n';
@@ -477,79 +476,77 @@ int run_diff(const std::vector<std::string>& user_args) {
         if (a != "--no-compact") args_no_compact.push_back(a);
     }
 
+    mtk::core::RunContext ctx;
+
     if (opts.wants_stat || opts.wants_no_compact) {
         std::vector<std::string> argv = {"git", "diff"};
         argv.insert(argv.end(), args_no_compact.begin(), args_no_compact.end());
-        auto captured = mtk::core::exec::capture(argv);
-        if (!captured.spawned) {
-            std::cerr << "mtk: failed to spawn git: " << captured.spawn_error << '\n';
-            return 127;
-        }
-        std::cout << captured.stdout_data;
-        if (!captured.stderr_data.empty()) std::cerr << captured.stderr_data;
-        return captured.exit_code;
+        auto outcome = ctx.capture(argv);
+        const auto* ran = ctx.as_ran(outcome);
+        if (!ran) return ctx.report_spawn_failure(outcome, "git");
+        std::cout << ran->stdout_data;
+        if (!ran->stderr_data.empty()) std::cerr << ran->stderr_data;
+        return ran->exit_code;
     }
 
     std::vector<std::string> stat_argv = {"git", "diff", "--stat"};
     stat_argv.insert(stat_argv.end(), args_no_compact.begin(), args_no_compact.end());
-    auto stat = mtk::core::exec::capture(stat_argv);
-    if (!stat.spawned) {
-        return mtk::core::exit_codes::report_spawn_failure("git", stat.spawn_error);
-    }
-    if (stat.exit_code != 0) {
-        std::cout << stat.stdout_data;
-        if (!stat.stderr_data.empty()) std::cerr << stat.stderr_data;
-        return stat.exit_code;
+    auto stat_out = ctx.capture(stat_argv);
+    const auto* stat = ctx.as_ran(stat_out);
+    if (!stat) return ctx.report_spawn_failure(stat_out, "git");
+    if (!stat->clean()) {
+        std::cout << stat->stdout_data;
+        if (!stat->stderr_data.empty()) std::cerr << stat->stderr_data;
+        return stat->exit_code;
     }
 
-    if (!stat.stdout_data.empty()) {
-        std::cout << stat.stdout_data;
-        if (stat.stdout_data.back() != '\n') std::cout << '\n';
+    if (!stat->stdout_data.empty()) {
+        std::cout << stat->stdout_data;
+        if (stat->stdout_data.back() != '\n') std::cout << '\n';
     }
 
     std::vector<std::string> diff_argv = {"git", "diff"};
     diff_argv.insert(diff_argv.end(), args_no_compact.begin(), args_no_compact.end());
-    auto diff = mtk::core::exec::capture(diff_argv);
-    if (!diff.spawned) {
-        return mtk::core::exit_codes::report_spawn_failure("git", diff.spawn_error);
-    }
+    auto diff_out = ctx.capture(diff_argv);
+    const auto* diff = ctx.as_ran(diff_out);
+    if (!diff) return ctx.report_spawn_failure(diff_out, "git");
 
-    if (!diff.stdout_data.empty()) {
+    if (!diff->stdout_data.empty()) {
         std::cout << "\nChanges:";
         std::string compacted;
         try {
-            compacted = internal::compact_diff(diff.stdout_data);
+            compacted = internal::compact_diff(diff->stdout_data);
         } catch (const std::exception& e) {
-            std::cerr << "mtk: filter warning: " << e.what() << '\n';
-            compacted = diff.stdout_data;
+            std::cerr << "mtk git: filter warning: " << e.what() << '\n';
+            compacted = diff->stdout_data;
         }
         std::cout << compacted;
         if (!compacted.empty() && compacted.back() != '\n') std::cout << '\n';
     }
 
-    return diff.exit_code;
+    return diff->exit_code;
 }
 
 int run_status(const std::vector<std::string>& user_args) {
+    mtk::core::RunContext ctx;
+
     if (!internal::uses_compact_status_path(user_args)) {
         std::vector<std::string> argv = {"git", "status"};
         argv.insert(argv.end(), user_args.begin(), user_args.end());
-        auto captured = mtk::core::exec::capture(argv);
-        if (!captured.spawned) {
-            std::cerr << "mtk: failed to spawn git: " << captured.spawn_error << '\n';
-            return 127;
-        }
-        if (captured.exit_code != 0) {
-            std::cout << captured.stdout_data;
-            if (!captured.stderr_data.empty()) std::cerr << captured.stderr_data;
-            return captured.exit_code;
+        auto outcome = ctx.capture(argv);
+        const auto* ran = ctx.as_ran(outcome);
+        if (!ran) return ctx.report_spawn_failure(outcome, "git");
+        if (!ran->clean()) {
+            std::cout << ran->stdout_data;
+            if (!ran->stderr_data.empty()) std::cerr << ran->stderr_data;
+            return ran->exit_code;
         }
         std::string filtered;
         try {
-            filtered = internal::filter_status_with_args(captured.stdout_data);
+            filtered = internal::filter_status_with_args(ran->stdout_data);
         } catch (const std::exception& e) {
-            std::cerr << "mtk: filter warning: " << e.what() << '\n';
-            filtered = captured.stdout_data;
+            std::cerr << "mtk git: filter warning: " << e.what() << '\n';
+            filtered = ran->stdout_data;
         }
         std::cout << filtered;
         if (!filtered.empty() && filtered.back() != '\n') std::cout << '\n';
@@ -558,42 +555,43 @@ int run_status(const std::vector<std::string>& user_args) {
 
     std::vector<std::string> plain_argv = {"git", "status"};
     plain_argv.insert(plain_argv.end(), user_args.begin(), user_args.end());
-    auto plain = mtk::core::exec::capture(plain_argv);
+    auto plain_out = ctx.capture(plain_argv);
 
     std::vector<std::string> porcelain_argv = {"git", "status", "--porcelain", "-b"};
-    auto porcelain = mtk::core::exec::capture(porcelain_argv);
-    if (!porcelain.spawned) {
-        return mtk::core::exit_codes::report_spawn_failure("git", porcelain.spawn_error);
-    }
+    auto porcelain_out = ctx.capture(porcelain_argv);
+    const auto* porcelain = ctx.as_ran(porcelain_out);
+    if (!porcelain) return ctx.report_spawn_failure(porcelain_out, "git");
 
-    if (!porcelain.stderr_data.empty() &&
-        porcelain.stderr_data.find("not a git repository") != std::string::npos) {
+    if (!porcelain->stderr_data.empty() &&
+        porcelain->stderr_data.find("not a git repository") != std::string::npos) {
         std::cerr << "Not a git repository\n";
-        return porcelain.exit_code != 0 ? porcelain.exit_code : 128;
+        return porcelain->exit_code != 0 ? porcelain->exit_code : 128;
     }
 
     // Plain status is only used to surface state/detached-HEAD info that
-    // porcelain collapses. If plain failed to spawn or returned non-zero,
-    // skip those extractions rather than feeding garbage to the parsers.
-    const bool plain_usable = plain.spawned && plain.exit_code == 0;
-    std::string_view plain_view = plain_usable ? plain.stdout_data : std::string_view{};
+    // porcelain collapses. If plain failed (spawn or non-zero exit), skip
+    // those extractions rather than feeding garbage to the parsers.
+    const auto* plain = ctx.as_ran(plain_out);
+    std::string_view plain_view =
+        (plain && plain->clean()) ? std::string_view(plain->stdout_data) : std::string_view{};
 
     auto detached = internal::extract_detached_head(plain_view);
-    auto formatted = internal::format_status_output(porcelain.stdout_data, detached);
+    auto formatted = internal::format_status_output(porcelain->stdout_data, detached);
     auto state = internal::extract_state_header(plain_view);
 
     if (state) std::cout << *state << '\n';
     std::cout << formatted;
     if (!formatted.empty() && formatted.back() != '\n') std::cout << '\n';
 
-    return porcelain.exit_code;
+    return porcelain->exit_code;
 }
 
 }  // namespace
 
 int run(const std::vector<std::string>& args) {
+    mtk::core::RunContext ctx;
     if (args.empty()) {
-        return mtk::core::exec::passthrough({"git"});
+        return ctx.passthrough({"git"});
     }
     const std::string& sub = args[0];
     std::vector<std::string> user_args(args.begin() + 1, args.end());
@@ -603,9 +601,9 @@ int run(const std::vector<std::string>& args) {
     if (sub == "diff") return run_diff(user_args);
     if (sub == "show") return run_show(user_args);
 
-    std::vector<std::string> passthrough = {"git"};
-    passthrough.insert(passthrough.end(), args.begin(), args.end());
-    return mtk::core::exec::passthrough(passthrough);
+    std::vector<std::string> argv = {"git"};
+    argv.insert(argv.end(), args.begin(), args.end());
+    return ctx.passthrough(argv);
 }
 
 }  // namespace mtk::cmds::git

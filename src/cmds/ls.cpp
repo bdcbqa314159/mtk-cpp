@@ -10,6 +10,7 @@
 #include "core/exec.hpp"
 #include "core/exit_codes.hpp"
 #include "core/limits.hpp"
+#include "core/run_context.hpp"
 #include "core/utils.hpp"
 
 namespace mtk::cmds::ls {
@@ -282,28 +283,28 @@ int run(const std::vector<std::string>& args) {
     auto opts = internal::parse_args(args);
     auto argv = build_ls_argv(args);
 
-    auto captured = mtk::core::exec::capture(argv, {{"LC_ALL", "C"}});
-    if (!captured.spawned) {
-        return mtk::core::exit_codes::report_spawn_failure("ls", captured.spawn_error);
-    }
+    mtk::core::RunContext ctx;
+    auto outcome = ctx.capture(argv, {{"LC_ALL", "C"}});
+    const auto* ran = ctx.as_ran(outcome);
+    if (!ran) return ctx.report_spawn_failure(outcome, "ls");
 
-    if (captured.exit_code != 0) {
-        std::cout << captured.stdout_data;
-        if (!captured.stderr_data.empty()) std::cerr << captured.stderr_data;
-        return captured.exit_code;
+    if (!ran->clean()) {
+        std::cout << ran->stdout_data;
+        if (!ran->stderr_data.empty()) std::cerr << ran->stderr_data;
+        return ran->exit_code;
     }
 
     internal::CompactResult result;
     try {
-        result = internal::compact_ls(captured.stdout_data, opts.show_all, opts.show_long);
+        result = internal::compact_ls(ran->stdout_data, opts.show_all, opts.show_long);
     } catch (const std::exception& e) {
-        std::cerr << "mtk: filter warning: " << e.what() << '\n';
-        std::cout << captured.stdout_data;
+        std::cerr << "mtk ls: filter warning: " << e.what() << '\n';
+        std::cout << ran->stdout_data;
         return 0;
     }
 
     bool has_real_content = false;
-    for (const auto& line : mtk::core::utils::split_lines(captured.stdout_data)) {
+    for (const auto& line : mtk::core::utils::split_lines(ran->stdout_data)) {
         if (line.empty()) continue;
         if (line.substr(0, 6) == "total ") continue;
         if (internal::is_dotdir(line)) continue;
@@ -311,7 +312,7 @@ int run(const std::vector<std::string>& args) {
         break;
     }
     if (result.parsed_count == 0 && has_real_content) {
-        std::cout << captured.stdout_data;
+        std::cout << ran->stdout_data;
         return 0;
     }
 
