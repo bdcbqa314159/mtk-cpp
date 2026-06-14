@@ -4,11 +4,14 @@
 #include <string_view>
 #include <vector>
 
+#include <filesystem>
+
 #include "core/default_registry.hpp"
 #include "core/exit_codes.hpp"
 #include "core/registry.hpp"
 #include "core/run_context.hpp"
 #include "core/signals.hpp"
+#include "core/trust.hpp"
 
 namespace {
 
@@ -20,6 +23,9 @@ void print_help() {
         << "  mtk <command> [args...]         Run command through registry dispatch\n"
         << "  mtk exec <command> [args...]    Same (alias)\n"
         << "  mtk explain <command> [args...] Show which filter would match (dry-run)\n"
+        << "  mtk trust [path]                Allow .mtk/filters/ at <path> (default: cwd)\n"
+        << "  mtk untrust [path]              Remove <path> from allow-list\n"
+        << "  mtk trusted                     List trusted paths\n"
         << "  mtk --version                   Print version\n"
         << "  mtk --help                      This help\n"
         << "\n"
@@ -30,7 +36,9 @@ void print_help() {
         << "  mtk ls\n"
         << "  mtk make                        (uses TOML filter if installed)\n"
         << "\n"
-        << "Set MTK_DEBUG=1 for dispatch trace to stderr.\n";
+        << "Environment:\n"
+        << "  MTK_DEBUG=1                     Dispatch trace to stderr\n"
+        << "  MTK_ALLOW_PROJECT_FILTERS=1     Bypass trust check (load any .mtk/filters/)\n";
 }
 
 const char* tier_label(mtk::core::Tier t) noexcept {
@@ -67,6 +75,47 @@ int run_explain(const std::vector<std::string>& argv) {
                   << "  (tier=" << tier_label(e.tier)
                   << ", source=" << e.source << ")\n";
     }
+    return 0;
+}
+
+int run_trust(const std::vector<std::string>& argv) {
+    std::filesystem::path target = argv.empty()
+        ? std::filesystem::current_path()
+        : std::filesystem::path(argv[0]);
+    auto resolved = mtk::core::trust::canonicalise(target);
+    if (resolved.empty()) return mtk::core::exit_codes::kUsage;
+    if (mtk::core::trust::add(resolved)) {
+        std::cout << "mtk trust: added " << resolved << '\n';
+    } else {
+        std::cout << "mtk trust: " << resolved << " already trusted (or write failed)\n";
+    }
+    return 0;
+}
+
+int run_untrust(const std::vector<std::string>& argv) {
+    std::filesystem::path target = argv.empty()
+        ? std::filesystem::current_path()
+        : std::filesystem::path(argv[0]);
+    auto resolved = mtk::core::trust::canonicalise(target);
+    if (resolved.empty()) return mtk::core::exit_codes::kUsage;
+    if (mtk::core::trust::remove(resolved)) {
+        std::cout << "mtk untrust: removed " << resolved << '\n';
+    } else {
+        std::cout << "mtk untrust: " << resolved << " not in allow-list\n";
+    }
+    return 0;
+}
+
+int run_trusted() {
+    auto list = mtk::core::trust::list();
+    if (list.empty()) {
+        std::cout << "(no trusted paths; "
+                  << mtk::core::trust::allowed_projects_file() << " is empty or absent)\n";
+        return 0;
+    }
+    std::cout << "Trusted paths (from "
+              << mtk::core::trust::allowed_projects_file() << "):\n";
+    for (const auto& p : list) std::cout << "  " << p << '\n';
     return 0;
 }
 
@@ -108,6 +157,15 @@ int main(int argc, char** argv) {
     // Meta-commands resolved before registry dispatch.
     if (args[0] == "explain") {
         return run_explain(std::vector<std::string>(args.begin() + 1, args.end()));
+    }
+    if (args[0] == "trust") {
+        return run_trust(std::vector<std::string>(args.begin() + 1, args.end()));
+    }
+    if (args[0] == "untrust") {
+        return run_untrust(std::vector<std::string>(args.begin() + 1, args.end()));
+    }
+    if (args[0] == "trusted") {
+        return run_trusted();
     }
 
     // Optional `exec` prefix for backward-compat: `mtk exec X` == `mtk X`.

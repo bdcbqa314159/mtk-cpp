@@ -64,6 +64,7 @@ set(MTK_CORE_SOURCES
     src/core/passthrough_filter.cpp
     src/core/toml_filter_adapter.cpp
     src/core/default_registry.cpp
+    src/core/trust.cpp
 )
 
 set(MTK_CMD_SOURCES

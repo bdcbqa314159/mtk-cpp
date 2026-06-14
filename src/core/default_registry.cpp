@@ -18,15 +18,25 @@ Registry build_default_registry() {
     mtk::cmds::ls::register_builtins(reg);
     mtk::cmds::grep::register_builtins(reg);
 
-    // Tier::UserToml — TOML filters from ~/.config/mtk/filters and
-    // .mtk/filters. (Phase 4's settings refactor splits these into proper
-    // user vs project tiers per A2's allow-list.)
-    auto tomls = mtk::core::config::load_all_filters();
-    for (auto& t : tomls) {
-        std::string source = "toml:" + t.name;
+    // Tier::UserToml — TOML filters from ~/.config/mtk/filters/. Always loaded.
+    auto user_tomls = mtk::core::config::load_user_filters();
+    for (auto& t : user_tomls) {
+        std::string source = "user:" + t.name;
         reg.register_filter(
             std::make_unique<TomlFilterAdapter>(std::move(t), std::move(source)),
             Tier::UserToml);
+    }
+
+    // Tier::ProjectToml — TOML filters from <cwd>/.mtk/filters/. Per A2:
+    // gated on trust (mtk trust . / mtk untrust . / MTK_ALLOW_PROJECT_FILTERS=1).
+    // Registry::register_filter rejects any project filter whose name() matches
+    // a final built-in — A2's shadow-prohibition.
+    auto project_tomls = mtk::core::config::load_project_filters();
+    for (auto& t : project_tomls) {
+        std::string source = "project:" + t.name;
+        reg.register_filter(
+            std::make_unique<TomlFilterAdapter>(std::move(t), std::move(source)),
+            Tier::ProjectToml);
     }
 
     // Tier::Fallback — always-match passthrough.
