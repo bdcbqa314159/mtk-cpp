@@ -1,10 +1,9 @@
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include <filesystem>
 
 #include "core/default_registry.hpp"
 #include "core/exit_codes.hpp"
@@ -12,12 +11,13 @@
 #include "core/run_context.hpp"
 #include "core/signals.hpp"
 #include "core/trust.hpp"
+#include "mtk/version.hpp"
 
 namespace {
 
 void print_help() {
     std::cout
-        << "mtk — Minimal Token Killer (v0.1.0)\n"
+        << "mtk — Minimal Token Killer (" << mtk::kVersion << ")\n"
         << "\n"
         << "Usage:\n"
         << "  mtk <command> [args...]         Run command through registry dispatch\n"
@@ -150,7 +150,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (args[0] == "--version") {
-        std::cout << "mtk 0.1.0\n";
+        std::cout << "mtk " << mtk::kVersion << '\n';
         return 0;
     }
 

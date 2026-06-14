@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(mtk CXX)
+project(mtk VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,6 +11,42 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 add_compile_options(-Wall -Wextra -Wpedantic -Wshadow -Wno-unused-parameter)
+
+# ---------- version stamp (git SHA + build date → src/version.hpp) ----------
+find_package(Git QUIET)
+if(GIT_FOUND)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} -C ${CMAKE_SOURCE_DIR} rev-parse --short=8 HEAD
+        OUTPUT_VARIABLE MTK_GIT_SHA
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE _git_rev_result
+    )
+    if(NOT _git_rev_result EQUAL 0)
+        set(MTK_GIT_SHA "unknown")
+    endif()
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} -C ${CMAKE_SOURCE_DIR} status --porcelain
+        OUTPUT_VARIABLE _git_status
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(_git_status)
+        set(MTK_GIT_SHA "${MTK_GIT_SHA}+dirty")
+    endif()
+else()
+    set(MTK_GIT_SHA "unknown")
+endif()
+
+string(TIMESTAMP MTK_BUILD_DATE "%Y-%m-%d" UTC)
+set(MTK_VERSION_FULL "${PROJECT_VERSION} (${MTK_GIT_SHA}, built ${MTK_BUILD_DATE})")
+message(STATUS "mtk version: ${MTK_VERSION_FULL}")
+
+configure_file(
+    ${CMAKE_SOURCE_DIR}/cmake/version.hpp.in
+    ${CMAKE_BINARY_DIR}/generated/mtk/version.hpp
+    @ONLY
+)
 
 # ---------- submodule sanity check ----------
 foreach(dep CLI11 tomlplusplus reproc fmt doctest)
@@ -25,29 +61,37 @@ endforeach()
 # ---------- third-party deps ----------
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
-# CLI11 (header-only target: CLI11::CLI11)
+# All third_party deps use EXCLUDE_FROM_ALL so `cmake --install` only
+# installs our own binary + filters + docs, not the static-linked-in deps.
+
+# CLI11 (header-only target: CLI11::CLI11). Currently unused — main.cpp
+# dropped CLI11 during Phase 1.5 (2/2). Kept loaded for the moment so the
+# submodule init doesn't churn; can be removed in a cleanup pass.
 set(CLI11_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(CLI11_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-add_subdirectory(third_party/CLI11)
+add_subdirectory(third_party/CLI11 EXCLUDE_FROM_ALL)
 
 # tomlplusplus (header-only target: tomlplusplus::tomlplusplus)
-add_subdirectory(third_party/tomlplusplus)
+add_subdirectory(third_party/tomlplusplus EXCLUDE_FROM_ALL)
 
 # fmt (target: fmt::fmt)
 set(FMT_TEST OFF CACHE BOOL "" FORCE)
 set(FMT_DOC OFF CACHE BOOL "" FORCE)
-add_subdirectory(third_party/fmt)
+set(FMT_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/fmt EXCLUDE_FROM_ALL)
 
 # reproc — C++ wrapper target: reproc++
 set(REPROC++ ON CACHE BOOL "" FORCE)
 set(REPROC_TEST OFF CACHE BOOL "" FORCE)
 set(REPROC_EXAMPLES OFF CACHE BOOL "" FORCE)
-add_subdirectory(third_party/reproc)
+set(REPROC_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/reproc EXCLUDE_FROM_ALL)
 
 # doctest (header-only target: doctest::doctest)
 set(DOCTEST_WITH_TESTS OFF CACHE BOOL "" FORCE)
 set(DOCTEST_WITH_MAIN_IN_STATIC_LIB OFF CACHE BOOL "" FORCE)
-add_subdirectory(third_party/doctest)
+set(DOCTEST_NO_INSTALL ON CACHE BOOL "" FORCE)
+add_subdirectory(third_party/doctest EXCLUDE_FROM_ALL)
 
 # ---------- mtk core ----------
 set(MTK_CORE_SOURCES
@@ -74,7 +118,11 @@ set(MTK_CMD_SOURCES
 )
 
 add_library(mtk_lib STATIC ${MTK_CORE_SOURCES} ${MTK_CMD_SOURCES})
-target_include_directories(mtk_lib PUBLIC src)
+target_include_directories(mtk_lib
+    PUBLIC
+        src
+        ${CMAKE_BINARY_DIR}/generated
+)
 target_link_libraries(mtk_lib
     PUBLIC
         reproc++
@@ -83,7 +131,15 @@ target_link_libraries(mtk_lib
 )
 
 add_executable(mtk src/main.cpp)
-target_link_libraries(mtk PRIVATE mtk_lib CLI11::CLI11)
+target_link_libraries(mtk PRIVATE mtk_lib)
 
 enable_testing()
 add_subdirectory(tests)
+
+# ---------- install ----------
+include(GNUInstallDirs)
+install(TARGETS mtk RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(DIRECTORY filters/ DESTINATION ${CMAKE_INSTALL_DATADIR}/mtk/filters
+        FILES_MATCHING PATTERN "*.toml")
+install(FILES INSTALL.md GUIDELINES.md
+        DESTINATION ${CMAKE_INSTALL_DOCDIR})

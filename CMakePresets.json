@@ -1,0 +1,59 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {"major": 3, "minor": 21, "patch": 0},
+  "configurePresets": [
+    {
+      "name": "release",
+      "displayName": "Release (default)",
+      "description": "Optimised build, dynamic-linked libstdc++/libgcc.",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "release-static",
+      "inherits": "release",
+      "displayName": "Release (static-linked stdc++/gcc)",
+      "description": "Binary that runs on older glibc — for cross-distro distribution. A Linux binary built here on Ubuntu 22 should run on RHEL 7.",
+      "binaryDir": "${sourceDir}/build-static",
+      "cacheVariables": {
+        "CMAKE_EXE_LINKER_FLAGS": "-static-libstdc++ -static-libgcc"
+      }
+    },
+    {
+      "name": "release-debug-symbols",
+      "inherits": "release",
+      "displayName": "Release with debug symbols (RelWithDebInfo)",
+      "description": "Optimised but keeps debug info — useful for crash investigation on deployed binaries.",
+      "binaryDir": "${sourceDir}/build-relwithdebinfo",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "debug",
+      "inherits": "release",
+      "displayName": "Debug",
+      "description": "Unoptimised, full debug info, asserts on. Use for dev work.",
+      "binaryDir": "${sourceDir}/build-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    }
+  ],
+  "buildPresets": [
+    {"name": "release", "configurePreset": "release"},
+    {"name": "release-static", "configurePreset": "release-static"},
+    {"name": "release-debug-symbols", "configurePreset": "release-debug-symbols"},
+    {"name": "debug", "configurePreset": "debug"}
+  ],
+  "testPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": {"outputOnFailure": true}
+    }
+  ]
+}
