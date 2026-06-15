@@ -64,9 +64,10 @@ public:
     [[nodiscard]] int report_spawn_failure(const mtk::core::exec::ExecOutcome& outcome,
                                            std::string_view tool) noexcept;
 
-    // --- audit (stub for Phase 1.0; implementation lands in Phase 3) ---
+    // --- audit (Phase 3: writes JSONL events to ~/.local/state/mtk/events.jsonl) ---
 
     struct AuditEvent {
+        std::string event_id;            // optional; audit() generates if empty
         std::string filter_name;
         std::string filter_source;
         std::vector<std::string> argv;
@@ -76,9 +77,23 @@ public:
         long elapsed_ms = 0;
         bool bytes_in_capped = false;
         bool timed_out = false;
+        int killed_by_signal = 0;
     };
 
-    void audit(const AuditEvent& event) noexcept;
+    // Appends the event to ~/.local/state/mtk/events.jsonl. If `bytes_in`
+    // is left 0, fills it in from the cumulative capture() byte count
+    // tracked by this RunContext. Returns the resolved event_id (caller
+    // can use it for payload capture).
+    std::string audit(AuditEvent event) noexcept;
+
+    // Cumulative bytes captured across all capture() calls on this
+    // RunContext. Used by audit() when the caller hasn't pre-populated
+    // bytes_in (the common case — filters call capture() N times, the
+    // RunContext sums internally).
+    [[nodiscard]] std::size_t cumulative_bytes_in() const noexcept;
+
+private:
+    std::size_t cumulative_in_bytes_ = 0;
 };
 
 }  // namespace mtk::core

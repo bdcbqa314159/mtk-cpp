@@ -3,6 +3,7 @@
 #include <iostream>
 #include <variant>
 
+#include "core/audit.hpp"
 #include "core/diagnostic.hpp"
 #include "core/exit_codes.hpp"
 #include "core/tee.hpp"
@@ -14,7 +15,11 @@ namespace ex = mtk::core::exec;
 ex::ExecOutcome RunContext::capture(const std::vector<std::string>& argv,
                                     const ex::EnvExtra& env_extra) noexcept {
     try {
-        return ex::capture_outcome(argv, env_extra);
+        auto outcome = ex::capture_outcome(argv, env_extra);
+        if (auto* ran = std::get_if<ex::Ran>(&outcome)) {
+            cumulative_in_bytes_ += ran->stdout_data.size() + ran->stderr_data.size();
+        }
+        return outcome;
     } catch (const std::exception& e) {
         return ex::SpawnFailed{e.what()};
     } catch (...) {
@@ -91,10 +96,27 @@ int RunContext::report_spawn_failure(const ex::ExecOutcome& outcome,
     return -1;
 }
 
-void RunContext::audit(const AuditEvent& /*event*/) noexcept {
-    // Phase 1.0 stub. Phase 3 writes ~/.local/state/mtk/events.jsonl
-    // per the A5 schema. The schema and call sites are committed here
-    // so Phase 3 doesn't re-touch every filter.
+std::string RunContext::audit(AuditEvent event) noexcept {
+    mtk::core::audit::Event e;
+    e.event_id = event.event_id.empty()
+        ? mtk::core::audit::make_event_id()
+        : std::move(event.event_id);
+    e.argv             = std::move(event.argv);
+    e.filter_name      = std::move(event.filter_name);
+    e.filter_source    = std::move(event.filter_source);
+    e.exit_code        = event.exit_code;
+    e.bytes_in         = event.bytes_in != 0 ? event.bytes_in : cumulative_in_bytes_;
+    e.bytes_out        = event.bytes_out;
+    e.elapsed_ms       = event.elapsed_ms;
+    e.bytes_in_capped  = event.bytes_in_capped;
+    e.timed_out        = event.timed_out;
+    e.killed_by_signal = event.killed_by_signal;
+    (void)mtk::core::audit::append(e);
+    return e.event_id;
+}
+
+std::size_t RunContext::cumulative_bytes_in() const noexcept {
+    return cumulative_in_bytes_;
 }
 
 }  // namespace mtk::core

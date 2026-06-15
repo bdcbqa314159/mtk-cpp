@@ -117,6 +117,7 @@ set(MTK_CORE_SOURCES
     src/core/toml_filter_adapter.cpp
     src/core/default_registry.cpp
     src/core/trust.cpp
+    src/core/audit.cpp
 )
 
 set(MTK_CMD_SOURCES
