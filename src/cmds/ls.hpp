@@ -29,7 +29,9 @@ struct LsEntry {
     std::string name;
 };
 
-bool is_dotdir(std::string_view line);
+// Takes the EXTRACTED filename (not the raw line) and returns true iff it
+// is the POSIX "." or ".." directory entry. Per correctness critic C12.
+bool is_dotdir(std::string_view filename) noexcept;
 std::optional<LsEntry> parse_ls_line(const std::string& line);
 std::optional<std::string> perms_to_octal(const std::string& perms);
 std::string human_size(std::uint64_t bytes);

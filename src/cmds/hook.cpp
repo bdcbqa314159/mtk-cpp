@@ -71,6 +71,62 @@ bool contains_shell_metachar(std::string_view cmd) noexcept {
     return false;
 }
 
+// Returns true if `tok` looks like a shell environment-variable assignment
+// (NAME=value) — i.e. starts with [A-Za-z_], contains '=' before any other
+// special char. Per POSIX shell grammar, these prefixes don't change the
+// real command (they just set env for the spawned process).
+bool is_env_assignment(std::string_view tok) noexcept {
+    if (tok.empty()) return false;
+    char c0 = tok.front();
+    if (!(std::isalpha(static_cast<unsigned char>(c0)) || c0 == '_')) return false;
+    auto eq = tok.find('=');
+    if (eq == std::string_view::npos) return false;
+    for (std::size_t i = 0; i < eq; ++i) {
+        char c = tok[i];
+        if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_')) return false;
+    }
+    return true;
+}
+
+// True if `tok` is a "wrapper" that's semantically transparent for the
+// purposes of deciding whether the real command would benefit from filtering.
+// `env` and `sudo` are the common ones; `nice`/`time`/`/usr/bin/env` too.
+bool is_transparent_wrapper(std::string_view tok) noexcept {
+    return tok == "env" || tok == "/usr/bin/env" ||
+           tok == "sudo" || tok == "doas" ||
+           tok == "nice" || tok == "time" ||
+           tok == "stdbuf";
+}
+
+// Strip leading env-assignments and transparent wrappers, returning the
+// index of the actual command in `argv`. Per correctness critic C5:
+// `FOO=bar git log`, `env FOO=bar git log`, `sudo git log` should all
+// trigger the git_log filter, not silently passthrough.
+std::size_t skip_leading_noops(const std::vector<std::string>& argv) noexcept {
+    std::size_t i = 0;
+    while (i < argv.size()) {
+        if (is_env_assignment(argv[i])) { ++i; continue; }
+        if (is_transparent_wrapper(argv[i])) {
+            ++i;
+            // After `env`/`sudo`, more env-assignments may follow.
+            while (i < argv.size() && is_env_assignment(argv[i])) ++i;
+            // For sudo specifically, common flags like `-E`/`-u user` precede
+            // the real command. Skip a small set of well-known no-arg flags;
+            // give up if we'd guess wrong (return current index, treat next
+            // token as the command — may miss rewrite but never wrong-wrap).
+            while (i < argv.size() && !argv[i].empty() && argv[i][0] == '-' &&
+                   (argv[i] == "-E" || argv[i] == "-H" || argv[i] == "-S" ||
+                    argv[i] == "-n" || argv[i] == "-A" || argv[i] == "--")) {
+                if (argv[i] == "--") { ++i; break; }
+                ++i;
+            }
+            continue;
+        }
+        break;
+    }
+    return i;
+}
+
 // Decide whether the given shell command would benefit from being routed
 // through mtk. Returns the rewritten string, or std::nullopt if no rewrite
 // is warranted.
@@ -84,12 +140,35 @@ std::optional<std::string> decide_rewrite(const std::string& cmd) {
     // Avoid rewriting commands already prefixed with mtk (idempotent hook).
     if (argv[0] == "mtk") return std::nullopt;
 
+    // Peel `FOO=bar`, `env FOO=bar`, `sudo -E`, etc. — the filter should
+    // match against the REAL command, not the wrapper.
+    std::size_t cmd_idx = skip_leading_noops(argv);
+    if (cmd_idx >= argv.size()) return std::nullopt;
+
+    // Match against the effective argv (without the wrapper prefix).
+    std::vector<std::string> effective(argv.begin() + cmd_idx, argv.end());
+    if (effective[0] == "mtk") return std::nullopt;  // mtk already in the middle
+
     auto reg = mtk::core::build_default_registry();
-    auto match = reg.find(argv);
+    auto match = reg.find(effective);
     if (!match.filter) return std::nullopt;
     if (match.filter->name() == std::string_view("_passthrough")) return std::nullopt;
 
-    return "mtk " + cmd;
+    // Wrap by injecting `mtk` immediately before the effective command —
+    // preserving any leading env-assignments / sudo / etc.
+    // For simplicity we rebuild as: <prefix> mtk <real cmd...>
+    std::string out;
+    for (std::size_t j = 0; j < cmd_idx; ++j) {
+        if (j > 0) out += ' ';
+        out += argv[j];
+    }
+    if (cmd_idx > 0) out += ' ';
+    out += "mtk";
+    for (const auto& tok : effective) {
+        out += ' ';
+        out += tok;
+    }
+    return out;
 }
 
 // --- VS Code Copilot Chat schema ---
@@ -170,9 +249,30 @@ bool try_handle_copilot_cli(json& v) {
 }  // namespace
 
 int run_copilot() {
-    std::ostringstream buf;
-    buf << std::cin.rdbuf();
-    std::string raw = buf.str();
+    // Correctness critic C6: cap stdin so an adversarial / accidentally-
+    // huge tool-input JSON can't OOM the hook (which would fail every
+    // Bash invocation in the session). Cap = 1 MiB; typical hook input
+    // is < 4 KiB. On overflow, emit the (truncated) input back unchanged
+    // so the agent gets a passthrough rather than a wedge.
+    constexpr std::size_t kMaxStdinBytes = 1 * 1024 * 1024;
+    std::string raw;
+    raw.reserve(8 * 1024);
+    char buf[8192];
+    while (raw.size() < kMaxStdinBytes && std::cin.read(buf, sizeof(buf))) {
+        raw.append(buf, static_cast<std::size_t>(std::cin.gcount()));
+    }
+    // Drain any trailing partial-read on EOF.
+    if (std::cin.gcount() > 0 && raw.size() < kMaxStdinBytes) {
+        std::size_t remaining = kMaxStdinBytes - raw.size();
+        std::size_t take = std::min(remaining, static_cast<std::size_t>(std::cin.gcount()));
+        raw.append(buf, take);
+    }
+    if (raw.size() >= kMaxStdinBytes) {
+        std::cerr << "[mtk hook copilot] input exceeded " << kMaxStdinBytes
+                  << " bytes — passing through unchanged\n";
+        std::cout << raw;
+        return 0;
+    }
 
     auto stripped = strip_bom(raw);
     // Trim trailing whitespace/newlines.

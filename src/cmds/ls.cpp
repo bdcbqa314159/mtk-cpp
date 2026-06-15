@@ -76,16 +76,14 @@ LsOptions parse_args(const std::vector<std::string>& args) {
     return opts;
 }
 
-bool is_dotdir(std::string_view line) {
-    std::string t = trim_copy(line);
-    return !t.empty() && (t.back() == '.' &&
-                          (t.size() == 1 || t[t.size() - 2] == '.' ||
-                           std::isspace(static_cast<unsigned char>(t[t.size() - 2]))));
+// Correctness critic C12: the previous heuristic operated on the raw line
+// and matched any trailing space-dot, silently dropping files literally
+// named "foo .". Fixed by checking the extracted filename only.
+bool is_dotdir(std::string_view filename) noexcept {
+    return filename == "." || filename == "..";
 }
 
 std::optional<LsEntry> parse_ls_line(const std::string& line) {
-    if (is_dotdir(line)) return std::nullopt;
-
     std::smatch m;
     if (!std::regex_search(line, m, ls_date_regex())) return std::nullopt;
 
@@ -171,8 +169,9 @@ CompactResult compact_ls(std::string_view raw, bool show_all, bool show_long) {
         if (starts_with(line, "total ") || line.empty()) continue;
         ++lines_seen;
         auto parsed = parse_ls_line(line);
-        if (!parsed) {
-            if (is_dotdir(line)) ++dotdirs;
+        if (!parsed) continue;
+        if (is_dotdir(parsed->name)) {
+            ++dotdirs;
             continue;
         }
         ++r.parsed_count;
@@ -320,7 +319,10 @@ public:
         for (const auto& line : mtk::core::utils::split_lines(ran->stdout_data)) {
             if (line.empty()) continue;
             if (line.substr(0, 6) == "total ") continue;
-            if (internal::is_dotdir(line)) continue;
+            // Per A5 (correctness critic C12): is_dotdir now takes the
+            // extracted filename, so parse first.
+            auto parsed = internal::parse_ls_line(line);
+            if (parsed && internal::is_dotdir(parsed->name)) continue;
             has_real_content = true;
             break;
         }

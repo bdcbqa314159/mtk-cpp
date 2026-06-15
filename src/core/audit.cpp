@@ -3,12 +3,16 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
+#include <fcntl.h>
 #include <fstream>
 #include <iomanip>
 #include <nlohmann/json.hpp>
 #include <random>
 #include <sstream>
+#include <sys/file.h>
+#include <unistd.h>
 
 namespace mtk::core::audit {
 
@@ -106,22 +110,71 @@ std::filesystem::path payload_dir() {
 }
 
 bool append(const Event& event) noexcept {
+    // Correctness critic C2+C7: PIPE_BUF atomicity only applies to pipes,
+    // not regular files. std::ofstream can split a single line across
+    // multiple write(2) calls and concurrent mtk processes can interleave
+    // bytes inside a JSON line. Fix: serialise to one buffer, then take a
+    // process-exclusive flock around: rotation-check + single write(2)
+    // + close. flock is held only for the syscall itself so contention
+    // stays in the microsecond range.
     try {
         auto log = log_file();
         std::error_code ec;
         std::filesystem::create_directories(log.parent_path(), ec);
-        rotate_if_needed(log);
 
         Event stamped = event;
         if (stamped.ts.empty()) stamped.ts = format_iso_utc_now();
+        std::string line = serialise(stamped);
+        line.push_back('\n');
 
-        // Single-line JSON; trailing newline. std::ofstream::app maps to
-        // O_APPEND on POSIX, which means writes are atomic up to PIPE_BUF
-        // (typically 4 KiB) — comfortably above our per-event size.
-        std::ofstream f(log, std::ios::app);
-        if (!f) return false;
-        f << serialise(stamped) << '\n';
-        return f.good();
+        int fd = ::open(log.c_str(),
+                        O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
+        if (fd < 0) return false;
+
+        // Block until we have the exclusive lock; only held across one
+        // rotate-check + one write. Per-event lock contention is bounded
+        // by the syscall cost (~tens of microseconds).
+        if (::flock(fd, LOCK_EX) != 0) {
+            ::close(fd);
+            return false;
+        }
+
+        // Rotate while holding the lock so cross-process moves are safe:
+        // process B's pending write either lands in the new (post-rotate)
+        // log, or it stalled in flock until our rotate finished.
+        rotate_if_needed(log);
+        // Re-open after rotate: the fd we have points at the now-renamed
+        // .1 file; subsequent writes would go there and be lost on next
+        // rotation. Drop our fd, open fresh.
+        if (std::error_code ec2; std::filesystem::file_size(log, ec2) == 0 ||
+                                 ec2.value() == ENOENT) {
+            ::close(fd);
+            fd = ::open(log.c_str(),
+                        O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
+            if (fd < 0) return false;
+            if (::flock(fd, LOCK_EX) != 0) {
+                ::close(fd);
+                return false;
+            }
+        }
+
+        ssize_t to_write = static_cast<ssize_t>(line.size());
+        ssize_t written = 0;
+        while (written < to_write) {
+            ssize_t n = ::write(fd, line.data() + written,
+                                static_cast<std::size_t>(to_write - written));
+            if (n < 0) {
+                if (errno == EINTR) continue;
+                (void)::flock(fd, LOCK_UN);
+                ::close(fd);
+                return false;
+            }
+            written += n;
+        }
+
+        (void)::flock(fd, LOCK_UN);
+        ::close(fd);
+        return true;
     } catch (...) {
         return false;
     }

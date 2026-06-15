@@ -75,8 +75,7 @@ int passthrough(const std::vector<std::string>& argv) {
     // so it gets the signal too; we still want to wait for it to exit and
     // propagate the exit code rather than dying first).
     while (true) {
-        if (int sig = mtk::core::signals::pending(); sig != 0) {
-            mtk::core::signals::clear();
+        if (int sig = mtk::core::signals::take(); sig != 0) {
             // proc::~process / .stop() will run the staged termination.
             (void)proc.terminate();
             auto [status, _ec] = proc.wait(
@@ -167,9 +166,8 @@ ExecOutcome capture_outcome(const std::vector<std::string>& argv,
         (void)proc.terminate();
     }
 
-    int pending_sig = mtk::core::signals::pending();
+    int pending_sig = mtk::core::signals::take();
     if (pending_sig != 0) {
-        mtk::core::signals::clear();
         (void)proc.terminate();
         ran.killed_by_signal = pending_sig;
     }
