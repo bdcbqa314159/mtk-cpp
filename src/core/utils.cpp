@@ -15,6 +15,16 @@ const std::regex& ansi_regex() {
 }  // namespace
 
 std::string strip_ansi(std::string_view input) {
+    // Per perf critic P12: search-first guard. Most captured output has
+    // zero ANSI escape sequences (any tool whose stdout is a pipe sees
+    // isatty()==false and skips colouring). std::regex_replace is the
+    // heaviest path in the library: building a match_results, walking the
+    // input via the NFA, and rebuilding a string. Probing for ESC (0x1b)
+    // with memchr first lets the common case return without instantiating
+    // any of that.
+    if (input.find('\x1b') == std::string_view::npos) {
+        return std::string(input);
+    }
     std::string s(input);
     return std::regex_replace(s, ansi_regex(), "");
 }
@@ -53,6 +63,21 @@ std::string truncate(std::string_view input, std::size_t max_len) {
 
 std::vector<std::string> split_lines(std::string_view input) {
     std::vector<std::string> lines;
+    std::size_t start = 0;
+    for (std::size_t i = 0; i < input.size(); ++i) {
+        if (input[i] == '\n') {
+            lines.emplace_back(input.substr(start, i - start));
+            start = i + 1;
+        }
+    }
+    if (start < input.size()) {
+        lines.emplace_back(input.substr(start));
+    }
+    return lines;
+}
+
+std::vector<std::string_view> split_lines_view(std::string_view input) {
+    std::vector<std::string_view> lines;
     std::size_t start = 0;
     for (std::size_t i = 0; i < input.size(); ++i) {
         if (input[i] == '\n') {

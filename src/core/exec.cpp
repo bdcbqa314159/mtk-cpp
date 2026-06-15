@@ -3,45 +3,20 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
-#include <filesystem>
 #include <reproc++/drain.hpp>
 #include <reproc++/reproc.hpp>
 
 #include "core/limits.hpp"
 #include "core/signals.hpp"
 
+// Per perf critic P7: previously we walked PATH ourselves before fork to
+// surface "command not found" early. Reproc already reports exec failure
+// through its error pipe, so `proc.start()` returns ec from a failed exec
+// inside the child; we use that as the authoritative signal. The
+// post-spawn "exit=127 with empty pipes" backstop in capture_outcome
+// remains as defense-in-depth.
+
 namespace mtk::core::exec {
-
-namespace {
-
-// Returns true if argv[0] is plausibly resolvable: either it contains a
-// path separator (let exec try) or it's findable on PATH. False only when
-// PATH was checked exhaustively and the binary isn't there. Surfaces
-// "command not found" before we fork — see A3's PATH pre-resolution.
-bool resolvable_command(std::string_view cmd) noexcept {
-    if (cmd.empty()) return false;
-    if (cmd.find('/') != std::string_view::npos) return true;
-    const char* path_env = std::getenv("PATH");
-    if (!path_env) return true;
-
-    std::string path_str(path_env);
-    std::size_t start = 0;
-    while (start <= path_str.size()) {
-        std::size_t end = path_str.find(':', start);
-        if (end == std::string::npos) end = path_str.size();
-        if (end > start) {
-            std::filesystem::path candidate(path_str.substr(start, end - start));
-            candidate /= std::string(cmd);
-            std::error_code ec;
-            if (std::filesystem::is_regular_file(candidate, ec)) return true;
-        }
-        if (end == path_str.size()) break;
-        start = end + 1;
-    }
-    return false;
-}
-
-}  // namespace
 
 // Staged termination: SIGTERM, wait kGraceMs, then SIGKILL.
 reproc::stop_actions staged_stop() {
@@ -55,10 +30,6 @@ reproc::stop_actions staged_stop() {
 
 int passthrough(const std::vector<std::string>& argv) {
     if (argv.empty()) return 127;
-    if (!resolvable_command(argv[0])) {
-        std::fprintf(stderr, "mtk %s: command not found in PATH\n", argv[0].c_str());
-        return 127;
-    }
 
     reproc::process proc;
     reproc::options opts;
@@ -66,8 +37,12 @@ int passthrough(const std::vector<std::string>& argv) {
     opts.stop = staged_stop();
 
     if (auto ec = proc.start(argv, opts)) {
-        std::fprintf(stderr, "mtk %s: failed to spawn: %s\n", argv[0].c_str(),
-                     ec.message().c_str());
+        if (ec == std::errc::no_such_file_or_directory) {
+            std::fprintf(stderr, "mtk %s: command not found in PATH\n", argv[0].c_str());
+        } else {
+            std::fprintf(stderr, "mtk %s: failed to spawn: %s\n", argv[0].c_str(),
+                         ec.message().c_str());
+        }
         return 127;
     }
 
@@ -128,9 +103,6 @@ ExecOutcome capture_outcome(const std::vector<std::string>& argv,
     if (argv.empty()) {
         return SpawnFailed{"empty argv"};
     }
-    if (!resolvable_command(argv[0])) {
-        return SpawnFailed{"command not found in PATH: " + argv[0]};
-    }
 
     reproc::process proc;
     reproc::options opts;
@@ -146,6 +118,13 @@ ExecOutcome capture_outcome(const std::vector<std::string>& argv,
     }
 
     if (auto ec = proc.start(argv, opts)) {
+        // Reproc surfaces exec failures (ENOENT for missing binary, EACCES
+        // for non-executable) via the in-child error pipe — normalise the
+        // ENOENT case to the friendlier "command not found in PATH" shape
+        // we used before P7.
+        if (ec == std::errc::no_such_file_or_directory) {
+            return SpawnFailed{"command not found in PATH: " + argv[0]};
+        }
         return SpawnFailed{ec.message()};
     }
 

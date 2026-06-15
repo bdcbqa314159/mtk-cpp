@@ -727,6 +727,13 @@ int dispatch(const std::vector<std::string>& argv) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    // Per perf critic P11: untie iostreams from C stdio. We do mixed
+    // `std::cout` (control-plane diagnostics) and `std::fwrite(stdout)`
+    // (hot-path dispatch output) — without this each iostream operation
+    // flushes the C buffer to keep ordering. Setting this at startup is
+    // the canonical way to ditch the sync overhead.
+    std::ios_base::sync_with_stdio(false);
+
     mtk::core::signals::install();
 
     std::vector<std::string> args(argv + 1, argv + argc);

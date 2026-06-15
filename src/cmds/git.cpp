@@ -67,7 +67,7 @@ std::string filter_log_output(std::string_view raw,
             if (pos < raw.size() && raw[pos] == '\n') ++pos;
         }
 
-        auto lines = mtk::core::utils::split_lines(chunk);
+        auto lines = mtk::core::utils::split_lines_view(chunk);
         while (!lines.empty() && lines.front().empty()) lines.erase(lines.begin());
         if (lines.empty()) continue;
 
@@ -181,7 +181,7 @@ using mtk::core::utils::trim_copy;
 }  // namespace
 
 std::optional<std::string> extract_state_header(std::string_view plain) {
-    for (const auto& raw_line : mtk::core::utils::split_lines(plain)) {
+    for (const auto& raw_line : mtk::core::utils::split_lines_view(plain)) {
         std::string stripped = trim_copy(raw_line);
         for (const auto& stopper : state_stoppers()) {
             if (starts_with(stripped, stopper)) return std::nullopt;
@@ -192,7 +192,7 @@ std::optional<std::string> extract_state_header(std::string_view plain) {
 }
 
 std::optional<std::string> extract_detached_head(std::string_view plain) {
-    for (const auto& raw_line : mtk::core::utils::split_lines(plain)) {
+    for (const auto& raw_line : mtk::core::utils::split_lines_view(plain)) {
         std::string stripped = trim_copy(raw_line);
         if (starts_with(stripped, "HEAD detached ")) return stripped;
     }
@@ -259,10 +259,10 @@ DiffOptions detect_diff_options(const std::vector<std::string>& args) {
 
 namespace {
 
-std::string extract_b_path(const std::string& diff_git_line) {
+std::string extract_b_path(std::string_view diff_git_line) {
     auto pos = diff_git_line.find(" b/");
-    if (pos == std::string::npos) return "unknown";
-    return diff_git_line.substr(pos + 3);
+    if (pos == std::string_view::npos) return "unknown";
+    return std::string(diff_git_line.substr(pos + 3));
 }
 
 }  // namespace
@@ -293,7 +293,7 @@ std::string compact_diff(std::string_view diff,
         }
     };
 
-    for (const auto& line : mtk::core::utils::split_lines(diff)) {
+    for (const auto& line : mtk::core::utils::split_lines_view(diff)) {
         if (starts_with(line, "diff --git")) {
             flush_hunk_truncation();
             flush_file_summary();
@@ -307,12 +307,12 @@ std::string compact_diff(std::string_view diff,
             flush_hunk_truncation();
             in_hunk = true;
             hunk_shown = 0;
-            result.push_back("  " + line);
+            result.push_back("  " + std::string(line));
         } else if (in_hunk) {
             if (starts_with(line, "+") && !starts_with(line, "+++")) {
                 ++added;
                 if (hunk_shown < max_hunk_lines) {
-                    result.push_back("  " + line);
+                    result.push_back("  " + std::string(line));
                     ++hunk_shown;
                 } else {
                     ++hunk_skipped;
@@ -320,14 +320,14 @@ std::string compact_diff(std::string_view diff,
             } else if (starts_with(line, "-") && !starts_with(line, "---")) {
                 ++removed;
                 if (hunk_shown < max_hunk_lines) {
-                    result.push_back("  " + line);
+                    result.push_back("  " + std::string(line));
                     ++hunk_shown;
                 } else {
                     ++hunk_skipped;
                 }
             } else if (hunk_shown < max_hunk_lines && !starts_with(line, "\\")) {
                 if (hunk_shown > 0) {
-                    result.push_back("  " + line);
+                    result.push_back("  " + std::string(line));
                     ++hunk_shown;
                 }
             }
@@ -522,32 +522,47 @@ public:
             return ctx.capture(cmd_argv);  // raw passthrough of git diff output
         }
 
-        std::vector<std::string> stat_argv = {"git", "diff", "--stat"};
-        stat_argv.insert(stat_argv.end(), args_no_compact.begin(), args_no_compact.end());
-        auto stat_out = ctx.capture(stat_argv);
-        const auto* stat = ctx.as_ran(stat_out);
-        if (!stat) return stat_out;
-        if (!stat->clean()) return stat_out;
-
-        std::string out;
-        if (!stat->stdout_data.empty()) {
-            out = stat->stdout_data;
-            if (out.back() != '\n') out += '\n';
-        }
-
-        std::vector<std::string> diff_argv = {"git", "diff"};
+        // Per perf critic P8 (Round D): single invocation. `git diff
+        // --stat --patch` outputs the diffstat block, a blank line, then
+        // the patch — all in one shot. Halves fork+exec cost vs the
+        // previous two-spawn pattern (one for --stat, one for the patch).
+        std::vector<std::string> diff_argv = {"git", "diff", "--stat", "--patch"};
         diff_argv.insert(diff_argv.end(), args_no_compact.begin(), args_no_compact.end());
         auto diff_out = ctx.capture(diff_argv);
         const auto* diff = ctx.as_ran(diff_out);
         if (!diff) return diff_out;
+        if (!diff->clean()) return diff_out;
 
-        if (!diff->stdout_data.empty()) {
+        // Split at the first `diff --git` line: everything before is the
+        // --stat block; everything from that line onward is the patch.
+        std::string_view full(diff->stdout_data);
+        auto patch_start = full.find("diff --git");
+
+        std::string out;
+        if (patch_start == std::string_view::npos) {
+            // No patch — either no changes or stat-only output. Pass the
+            // stat through unchanged.
+            out = std::string(full);
+        } else {
+            std::string_view stat_block = full.substr(0, patch_start);
+            std::string_view patch = full.substr(patch_start);
+
+            // Strip trailing blank lines on the stat block — git inserts a
+            // blank separator that we don't want to keep ahead of "Changes:".
+            while (!stat_block.empty() &&
+                   (stat_block.back() == '\n' || stat_block.back() == ' ')) {
+                stat_block.remove_suffix(1);
+            }
+            if (!stat_block.empty()) {
+                out.assign(stat_block);
+                out += '\n';
+            }
             out += "\nChanges:";
             std::string compacted;
             try {
-                compacted = internal::compact_diff(diff->stdout_data);
+                compacted = internal::compact_diff(patch);
             } catch (const std::exception&) {
-                compacted = diff->stdout_data;
+                compacted = std::string(patch);
             }
             out += compacted;
         }
@@ -586,41 +601,59 @@ public:
             return ctx.capture(cmd_argv);
         }
 
-        std::vector<std::string> sum_argv = {"git", "show", "--no-patch",
-                                             "--pretty=format:%h %s (%ar) <%an>"};
-        sum_argv.insert(sum_argv.end(), user_args.begin(), user_args.end());
-        auto sum_out = ctx.capture(sum_argv);
-        const auto* sum = ctx.as_ran(sum_out);
-        if (!sum) return sum_out;
-        if (!sum->clean()) {
-            return ex::Ran{std::string{}, sum->stderr_data, sum->exit_code,
-                           sum->truncated, sum->timed_out, sum->killed_by_signal};
+        // Per perf critic P8 (Round D): single invocation. `%n` at the
+        // end of the pretty format ensures the summary line is newline-
+        // terminated before the --stat block; `--stat --patch` then emits
+        // stat-block then patch (with a blank line between). Saves
+        // 2 fork+exec round-trips vs the previous three-spawn pattern.
+        std::vector<std::string> show_argv = {"git", "show", "--stat", "--patch",
+                                              "--pretty=format:%h %s (%ar) <%an>%n"};
+        show_argv.insert(show_argv.end(), user_args.begin(), user_args.end());
+        auto show_out = ctx.capture(show_argv);
+        const auto* show = ctx.as_ran(show_out);
+        if (!show) return show_out;
+        if (!show->clean()) {
+            return ex::Ran{std::string{}, show->stderr_data, show->exit_code,
+                           show->truncated, show->timed_out, show->killed_by_signal};
         }
 
-        std::string out = sum->stdout_data;
-        if (!out.empty() && out.back() != '\n') out += '\n';
+        // Split at the first `diff --git` line: everything before is the
+        // summary line + --stat block; everything from there is the patch.
+        std::string_view full(show->stdout_data);
+        auto patch_start = full.find("diff --git");
 
-        std::vector<std::string> stat_argv = {"git", "show", "--stat", "--pretty=format:"};
-        stat_argv.insert(stat_argv.end(), user_args.begin(), user_args.end());
-        auto stat_out = ctx.capture(stat_argv);
-        if (const auto* stat = ctx.as_ran(stat_out); stat && !stat->stdout_data.empty()) {
-            out += stat->stdout_data;
-        }
+        std::string out;
+        // Git inserts a literal `---\n` commit-boundary separator between
+        // the pretty-format prefix and the --stat block. Strip it once
+        // (single occurrence guaranteed for a one-commit `git show`).
+        auto strip_git_separator = [](std::string& s) {
+            auto pos = s.find("\n---\n");
+            if (pos != std::string::npos) s.erase(pos, 4);  // leave the trailing \n
+        };
 
-        std::vector<std::string> diff_argv = {"git", "show", "--pretty=format:"};
-        diff_argv.insert(diff_argv.end(), user_args.begin(), user_args.end());
-        auto diff_out = ctx.capture(diff_argv);
-        if (const auto* diff = ctx.as_ran(diff_out); diff && !diff->stdout_data.empty()) {
+        if (patch_start == std::string_view::npos) {
+            // No patch present (e.g. empty commit). Pass through.
+            out.assign(full);
+            strip_git_separator(out);
+            if (!out.empty() && out.back() != '\n') out += '\n';
+        } else {
+            std::string_view summary_stat = full.substr(0, patch_start);
+            std::string_view patch = full.substr(patch_start);
+            out.assign(summary_stat);
+            strip_git_separator(out);
+            if (!out.empty() && out.back() != '\n') out += '\n';
+
             std::string compacted;
             try {
-                compacted = internal::compact_diff(diff->stdout_data);
+                compacted = internal::compact_diff(patch);
             } catch (const std::exception&) {
-                compacted = diff->stdout_data;
+                compacted.assign(patch);
             }
             out += compacted;
             if (!compacted.empty() && compacted.back() != '\n') out += '\n';
         }
-        return ex::Ran{std::move(out), std::string{}, 0, false, false, 0};
+        return ex::Ran{std::move(out), std::string{}, 0,
+                       show->truncated, show->timed_out, show->killed_by_signal};
     }
 };
 

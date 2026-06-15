@@ -1,5 +1,6 @@
 #include "core/run_context.hpp"
 
+#include <cstdio>
 #include <iostream>
 #include <variant>
 
@@ -63,13 +64,17 @@ int RunContext::emit(ex::ExecOutcome&& outcome, std::string_view tool) noexcept 
     std::string stderr_data = std::move(ran->stderr_data);
     int exit_code = ran->exit_code;
 
-    try {
-        std::cout << stdout_data;
-        if (!stdout_data.empty() && stdout_data.back() != '\n') std::cout << '\n';
-        if (!stderr_data.empty()) std::cerr << stderr_data;
-    } catch (...) {
-        // I/O failure on stdout/stderr — nothing useful we can do, exit
-        // code still propagates.
+    // Per perf critic P10: write directly to stdout/stderr via fwrite
+    // rather than `std::cout <<`. iostream formatting + sentry construction
+    // + sync_with_stdio glue adds up on multi-KB blobs; fwrite is a single
+    // libc call per buffer. Exceptions can't escape from these calls so
+    // the try is gone.
+    if (!stdout_data.empty()) {
+        std::fwrite(stdout_data.data(), 1, stdout_data.size(), stdout);
+        if (stdout_data.back() != '\n') std::fputc('\n', stdout);
+    }
+    if (!stderr_data.empty()) {
+        std::fwrite(stderr_data.data(), 1, stderr_data.size(), stderr);
     }
     return exit_code;
 }

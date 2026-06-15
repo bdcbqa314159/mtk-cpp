@@ -251,7 +251,7 @@ public:
             };
         }
 
-        auto raw_lines = mtk::core::utils::split_lines(ran->stdout_data);
+        auto raw_lines = mtk::core::utils::split_lines_view(ran->stdout_data);
         std::size_t total_matches = raw_lines.size();
 
         std::unordered_map<std::string, std::vector<std::pair<std::size_t, std::string>>>
