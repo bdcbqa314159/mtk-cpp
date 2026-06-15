@@ -42,6 +42,10 @@ public:
     //   - a filter with the same name() exists at the same tier
     //   - the filter is at ProjectToml tier and a Builtin filter with the
     //     same name() exists (A2's shadowing prohibition)
+    // Return value is documentary — call sites don't currently check it
+    // (registration happens at startup; failure logs to stderr). Leaving
+    // it without [[nodiscard]] preserves the existing "best-effort
+    // register" call pattern in default_registry / cmds/*.cpp.
     bool register_filter(std::unique_ptr<Filter> f, Tier tier, bool is_final = false);
 
     // Find the first matching filter across all tiers in priority order.

@@ -12,6 +12,19 @@ namespace mtk::core {
 
 namespace {
 
+void register_org_filters(Registry& reg, std::vector<toml_filter::Filter>& tomls) {
+    for (auto& t : tomls) {
+        // Per A7: `locked = true` in an org TOML promotes is_final, which
+        // blocks every lower-priority tier (Builtin/User/Project) from
+        // registering the same name.
+        const bool is_final = t.locked;
+        std::string source = "org:" + t.name;
+        reg.register_filter(
+            std::make_unique<TomlFilterAdapter>(std::move(t), std::move(source)),
+            Tier::OrgToml, is_final);
+    }
+}
+
 void register_user_filters(Registry& reg, std::vector<toml_filter::Filter>& tomls) {
     for (auto& t : tomls) {
         std::string source = "user:" + t.name;
@@ -40,6 +53,13 @@ Registry build_default_registry() {
     mtk::cmds::git::register_builtins(reg);
     mtk::cmds::ls::register_builtins(reg);
     mtk::cmds::grep::register_builtins(reg);
+
+    // Per A7: org filters always loaded fresh — they're root-owned in
+    // /etc and shouldn't be cached in the user's cache dir (a stale
+    // cache could mask a policy update). They're typically a small
+    // handful, parse cost is negligible.
+    auto org_tomls = mtk::core::config::load_org_filters();
+    register_org_filters(reg, org_tomls);
 
     // Per perf critic P2: try the binary cache first. Manifest covers
     // every TOML file we'd load — any mtime/size change invalidates,

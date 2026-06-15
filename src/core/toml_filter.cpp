@@ -109,6 +109,7 @@ std::vector<Filter> parse_all(std::string_view toml_source) {
         f.match_command_pattern = (*section)["match_command"].value_or<std::string>("");
         f.filter_stderr = (*section)["filter_stderr"].value_or(false);
         f.strip_ansi = (*section)["strip_ansi"].value_or(false);
+        f.locked = (*section)["locked"].value_or(false);
 
         if (auto repl_arr = (*section)["replace"].as_array()) {
             for (const auto& e : *repl_arr) {

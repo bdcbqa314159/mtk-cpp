@@ -13,9 +13,7 @@
 
 namespace mtk::cmds::hook {
 
-namespace {
-
-using json = nlohmann::json;
+namespace internal {
 
 // Strip a leading UTF-8 BOM (some Windows hosts prepend one to hook stdin).
 std::string_view strip_bom(std::string_view s) noexcept {
@@ -170,6 +168,14 @@ std::optional<std::string> decide_rewrite(const std::string& cmd) {
     }
     return out;
 }
+
+}  // namespace internal
+
+namespace {
+
+using json = nlohmann::json;
+using internal::decide_rewrite;
+using internal::strip_bom;
 
 // --- VS Code Copilot Chat schema ---
 // {"tool_name": "Bash"|"runTerminalCommand", "tool_input": {"command": "..."}}

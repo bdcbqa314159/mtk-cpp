@@ -20,6 +20,14 @@ struct Filter {
     bool filter_stderr = false;
     bool strip_ansi = false;
 
+    // Per A7 (Phase 4): an org-level filter (loaded from /etc/mtk/filters
+    // by default) can opt into `locked = true`. The registry then rejects
+    // any same-name filter from a lower-priority tier (Builtin, User,
+    // Project). Default false — user-/project-level filters cannot lock
+    // themselves against each other. Honoured only for OrgToml tier;
+    // ignored elsewhere.
+    bool locked = false;
+
     // Pattern-strings (source of truth for serialisation, diagnostics).
     std::vector<std::pair<std::string, std::string>> replace;
     std::optional<std::pair<std::string, std::string>> match_output;

@@ -1,5 +1,7 @@
 #pragma once
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace mtk::cmds::hook {
@@ -18,5 +20,18 @@ namespace mtk::cmds::hook {
 // Errors (malformed JSON, missing fields, etc.) are non-fatal: emit a
 // stderr warning, pass input through unchanged, return 0.
 [[nodiscard]] int run_copilot();
+
+// Internal pure helpers — exposed for unit testing. Per CE6.
+namespace internal {
+
+[[nodiscard]] std::string_view strip_bom(std::string_view s) noexcept;
+[[nodiscard]] std::vector<std::string> tokenise(std::string_view cmd);
+[[nodiscard]] bool contains_shell_metachar(std::string_view cmd) noexcept;
+[[nodiscard]] bool is_env_assignment(std::string_view tok) noexcept;
+[[nodiscard]] bool is_transparent_wrapper(std::string_view tok) noexcept;
+[[nodiscard]] std::size_t skip_leading_noops(const std::vector<std::string>& argv) noexcept;
+[[nodiscard]] std::optional<std::string> decide_rewrite(const std::string& cmd);
+
+}  // namespace internal
 
 }  // namespace mtk::cmds::hook

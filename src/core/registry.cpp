@@ -35,16 +35,25 @@ bool Registry::register_filter(std::unique_ptr<Filter> f, Tier tier, bool is_fin
         }
     }
 
-    // ProjectToml may not shadow a Builtin by name (A2).
-    if (tier == Tier::ProjectToml) {
-        for (const auto& rf : filters_) {
-            if (rf.tier == Tier::Builtin && rf.is_final &&
-                rf.filter->name() == new_name) {
-                std::cerr << "mtk registry: rejected project filter '" << new_name
-                          << "' — would shadow final built-in (source="
-                          << f->source() << ")\n";
-                return false;
-            }
+    // Per A7: generalised shadowing prohibition. An `is_final` filter at
+    // ANY higher-priority tier (lower Tier number) blocks lower-priority
+    // tiers from registering the same name. Two existing uses today:
+    //   - Builtin (is_final=true via cmds/*.cpp register_builtins) blocks
+    //     ProjectToml from defining e.g. its own `git_log` (closes A2's
+    //     silent-shadow attack).
+    //   - OrgToml (is_final=true via `locked = true` in /etc/mtk TOML)
+    //     blocks Builtin, UserToml, and ProjectToml from same-name
+    //     registration — lets an org pin an authoritative pipeline.
+    for (const auto& rf : filters_) {
+        if (static_cast<int>(rf.tier) < static_cast<int>(tier) &&
+            rf.is_final &&
+            rf.filter->name() == new_name) {
+            std::cerr << "mtk registry: rejected '" << new_name
+                      << "' at tier=" << tier_name(tier)
+                      << " — would shadow final filter from tier="
+                      << tier_name(rf.tier) << " (source="
+                      << rf.filter->source() << ")\n";
+            return false;
         }
     }
 

@@ -16,7 +16,9 @@ namespace {
 // File format magic + version. Bump version when the on-disk layout
 // changes; old caches with wrong version are treated as invalid (rebuilt).
 constexpr char kMagic[4] = {'M', 'T', 'K', 'F'};
-constexpr std::uint32_t kVersion = 1;
+// v2: added Filter.locked field (A7 layered config). Older caches are
+// invalidated and rebuilt — single per-invocation parse, no migration.
+constexpr std::uint32_t kVersion = 2;
 
 std::filesystem::path cache_dir() {
     if (const char* xdg = std::getenv("XDG_CACHE_HOME")) {
@@ -71,6 +73,7 @@ void write_filter(Writer& w, const toml_filter::Filter& f) {
     w.str(f.match_command_pattern);
     w.u8(f.filter_stderr ? 1 : 0);
     w.u8(f.strip_ansi ? 1 : 0);
+    w.u8(f.locked ? 1 : 0);
 
     w.u32(static_cast<std::uint32_t>(f.replace.size()));
     for (const auto& [p, r] : f.replace) { w.str(p); w.str(r); }
@@ -104,6 +107,7 @@ toml_filter::Filter read_filter(Reader& r) {
     f.match_command_pattern = r.str();
     f.filter_stderr = r.u8() != 0;
     f.strip_ansi = r.u8() != 0;
+    f.locked = r.u8() != 0;
 
     auto n = r.u32();
     f.replace.reserve(n);

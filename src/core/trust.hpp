@@ -40,11 +40,11 @@ namespace mtk::core::trust {
 
 // Adds `p` (canonicalised) to the allow-list. Returns true if newly added,
 // false if already present or on I/O error.
-bool add(const std::filesystem::path& p);
+[[nodiscard]] bool add(const std::filesystem::path& p);
 
 // Removes `p` (canonicalised) from the allow-list. Returns true if removed,
 // false if absent.
-bool remove(const std::filesystem::path& p);
+[[nodiscard]] bool remove(const std::filesystem::path& p);
 
 // Returns the current list of trusted canonical paths.
 [[nodiscard]] std::vector<std::filesystem::path> list();

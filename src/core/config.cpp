@@ -54,8 +54,23 @@ std::filesystem::path filters_dir() {
     return config_dir() / "filters";
 }
 
+std::filesystem::path org_dir() {
+    if (const char* env = std::getenv("MTK_ORG_CONFIG")) {
+        return std::filesystem::path(env);
+    }
+    return std::filesystem::path("/etc/mtk");
+}
+
+std::filesystem::path org_filters_dir() {
+    return org_dir() / "filters";
+}
+
 std::vector<mtk::core::toml_filter::Filter> load_user_filters() {
     return load_from_dir(filters_dir());
+}
+
+std::vector<mtk::core::toml_filter::Filter> load_org_filters() {
+    return load_from_dir(org_filters_dir());
 }
 
 std::vector<mtk::core::toml_filter::Filter> load_project_filters() {
@@ -103,6 +118,10 @@ std::vector<std::filesystem::path> list_toml_paths(const std::filesystem::path& 
 
 std::vector<std::filesystem::path> user_filter_paths() {
     return list_toml_paths(filters_dir());
+}
+
+std::vector<std::filesystem::path> org_filter_paths() {
+    return list_toml_paths(org_filters_dir());
 }
 
 std::vector<std::filesystem::path> project_filter_paths() {
