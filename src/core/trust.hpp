@@ -17,10 +17,25 @@ namespace mtk::core::trust {
 
 // Canonicalises `p` (resolves symlinks, makes absolute). Returns empty path
 // on error (logs to stderr). Name avoids collision with std::filesystem::canonical.
+//
+// Per correctness critic C9 — symlink semantics, made explicit:
+//   * Resolution happens at BOTH trust-time (`add`) and check-time
+//     (`is_trusted`). What gets stored / compared is the resolved target.
+//   * Trusting `~/work` when `~/work` -> `/data/repos/work` stores
+//     `/data/repos/work`. Any later symlink that resolves to the same
+//     target is also trusted (the allow-list trusts repositories, not
+//     pathnames).
+//   * If the symlink target changes between trust-time and check-time,
+//     access via that symlink stops being trusted. This is the desired
+//     behaviour: a repo that was swapped out at the filesystem level
+//     should not inherit trust.
+//   * Match is EXACT — no prefix matching. Trusting `/data/repos/work`
+//     does NOT trust `/data/repos/work/subdir`. This is by design: a
+//     malicious subdir cannot inherit trust from its parent.
 [[nodiscard]] std::filesystem::path canonicalise(const std::filesystem::path& p);
 
 // True if the env var MTK_ALLOW_PROJECT_FILTERS=1 OR if `p` (canonicalised)
-// is listed in the allow-list file.
+// is listed in the allow-list file. See `canonicalise` for symlink semantics.
 [[nodiscard]] bool is_trusted(const std::filesystem::path& p);
 
 // Adds `p` (canonicalised) to the allow-list. Returns true if newly added,

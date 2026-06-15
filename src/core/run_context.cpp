@@ -19,6 +19,9 @@ ex::ExecOutcome RunContext::capture(const std::vector<std::string>& argv,
         auto outcome = ex::capture_outcome(argv, env_extra);
         if (auto* ran = std::get_if<ex::Ran>(&outcome)) {
             cumulative_in_bytes_ += ran->stdout_data.size() + ran->stderr_data.size();
+            // Per C11: set sticky truncation flag so audit() picks it up
+            // even when the caller discards this intermediate Ran.
+            if (ran->truncated) any_truncated_ = true;
         }
         return outcome;
     } catch (const std::exception& e) {
@@ -113,7 +116,8 @@ std::string RunContext::audit(AuditEvent event) noexcept {
     e.bytes_in         = event.bytes_in != 0 ? event.bytes_in : cumulative_in_bytes_;
     e.bytes_out        = event.bytes_out;
     e.elapsed_ms       = event.elapsed_ms;
-    e.bytes_in_capped  = event.bytes_in_capped;
+    // OR in the sticky flag — a true value from either source wins.
+    e.bytes_in_capped  = event.bytes_in_capped || any_truncated_;
     e.timed_out        = event.timed_out;
     e.killed_by_signal = event.killed_by_signal;
     (void)mtk::core::audit::append(e);
@@ -122,6 +126,10 @@ std::string RunContext::audit(AuditEvent event) noexcept {
 
 std::size_t RunContext::cumulative_bytes_in() const noexcept {
     return cumulative_in_bytes_;
+}
+
+bool RunContext::any_capture_truncated() const noexcept {
+    return any_truncated_;
 }
 
 }  // namespace mtk::core

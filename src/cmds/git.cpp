@@ -293,6 +293,7 @@ std::string compact_diff(std::string_view diff,
         }
     };
 
+    bool hit_global_cap = false;
     for (const auto& line : mtk::core::utils::split_lines_view(diff)) {
         if (starts_with(line, "diff --git")) {
             flush_hunk_truncation();
@@ -334,15 +335,26 @@ std::string compact_diff(std::string_view diff,
         }
 
         if (result.size() >= max_lines) {
-            result.push_back("\n... (more changes truncated)");
-            was_truncated = true;
+            hit_global_cap = true;
             break;
         }
     }
 
+    // Per correctness critic C4: the pending hunk-truncation marker and
+    // the current file's "+N -M" summary belong to the file we just
+    // emitted — they MUST appear before the global "(more changes
+    // truncated)" marker, not after. Previously the loop pushed the
+    // global marker inline and the post-loop flushes appended after it,
+    // giving an order of [content][global-trunc][hunk-trunc][file-sum]
+    // [escape-hint] which read as if the per-file summary belonged to
+    // hidden content past the truncation point. Now we flush per-file
+    // first, then push the global marker, then the escape hint.
     flush_hunk_truncation();
     flush_file_summary();
-
+    if (hit_global_cap) {
+        result.push_back("\n... (more changes truncated)");
+        was_truncated = true;
+    }
     if (was_truncated) {
         result.push_back("[full diff: mtk git diff --no-compact]");
     }

@@ -31,16 +31,40 @@ std::vector<std::filesystem::path> read_file_unfiltered(const std::filesystem::p
     return out;
 }
 
+// Per correctness critic C8: write atomically via temp-file + rename(2).
+// The previous truncate-then-write pattern left the allow-list empty
+// (or torn) if mtk was killed mid-write, or if a concurrent reader hit
+// the file between the truncate and the trailing writes. rename(2) on
+// the same filesystem is atomic per POSIX, so a reader either sees the
+// old file or the new file in full — never partial. Concurrent
+// `mtk trust` writers can still race (lost-update), but that's a
+// separate concern (rare for an interactive command).
 bool write_file(const std::filesystem::path& path,
                 const std::vector<std::filesystem::path>& entries) {
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
-    std::ofstream f(path, std::ios::trunc);
-    if (!f) return false;
-    f << "# mtk allow-list — canonical paths whose .mtk/filters/ may load.\n"
-      << "# Edit via `mtk trust <path>` / `mtk untrust <path>`.\n";
-    for (const auto& e : entries) f << e.string() << '\n';
-    return f.good();
+
+    auto tmp = path;
+    tmp += ".mtk-tmp";
+
+    {
+        std::ofstream f(tmp, std::ios::trunc);
+        if (!f) return false;
+        f << "# mtk allow-list — canonical paths whose .mtk/filters/ may load.\n"
+          << "# Edit via `mtk trust <path>` / `mtk untrust <path>`.\n";
+        for (const auto& e : entries) f << e.string() << '\n';
+        if (!f.good()) {
+            std::filesystem::remove(tmp, ec);  // best-effort cleanup
+            return false;
+        }
+    }  // ofstream dtor flushes + closes before rename
+
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) {
+        std::filesystem::remove(tmp, ec);  // best-effort cleanup
+        return false;
+    }
+    return true;
 }
 
 }  // namespace

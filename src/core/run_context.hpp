@@ -92,8 +92,16 @@ public:
     // RunContext sums internally).
     [[nodiscard]] std::size_t cumulative_bytes_in() const noexcept;
 
+    // Per correctness critic C11: sticky truncation flag. Set when any
+    // capture() on this RunContext returned a Ran with truncated=true.
+    // audit() ORs this into bytes_in_capped so multi-capture filters
+    // (git status, pre-Round-D git show) don't lose the truncation
+    // signal from intermediate captures whose Ran the caller discards.
+    [[nodiscard]] bool any_capture_truncated() const noexcept;
+
 private:
     std::size_t cumulative_in_bytes_ = 0;
+    bool any_truncated_ = false;
 };
 
 }  // namespace mtk::core

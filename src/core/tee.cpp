@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <fmt/format.h>
 #include <fstream>
+#include <unistd.h>
 
 #include "core/limits.hpp"
 
@@ -45,11 +46,17 @@ std::filesystem::path tee_dir() {
 std::optional<std::string> tee_and_hint(std::string_view raw,
                                         std::string_view command_slug,
                                         int exit_code) {
+    // Per correctness critic C10: the previous filename
+    // `{secs}_{slug}_{exit}.log` collided whenever two failures of the
+    // same command happened within the same second — the second write
+    // silently overwrote the first. Use nanosecond resolution + PID so
+    // the filename is unique both within and across mtk processes.
     auto now = std::chrono::system_clock::now().time_since_epoch();
-    auto secs = std::chrono::duration_cast<std::chrono::seconds>(now).count();
+    auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
+    auto pid = static_cast<long>(::getpid());
 
     auto path = tee_dir() /
-        fmt::format("{}_{}_{}.log", secs, slugify(command_slug), exit_code);
+        fmt::format("{}_{}_{}_{}.log", ns, pid, slugify(command_slug), exit_code);
 
     std::ofstream f(path, std::ios::binary);
     if (!f) return std::nullopt;
