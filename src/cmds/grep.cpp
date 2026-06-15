@@ -23,43 +23,50 @@ using mtk::core::utils::trim_copy;
 
 }  // namespace
 
+namespace {
+
+// Try parsing `<file><sep><digits>:<content>` given a candidate position
+// for the file/line separator. Returns nullopt if the digits-then-colon
+// shape doesn't follow `sep_pos`. Shared between the NUL-separated and
+// colon-separated parse paths.
+std::optional<ParsedMatch> try_parse_at(std::string_view line, std::size_t sep_pos) {
+    std::size_t start_digits = sep_pos + 1;
+    std::size_t i = start_digits;
+    while (i < line.size() && std::isdigit(static_cast<unsigned char>(line[i]))) ++i;
+    if (i == start_digits || i >= line.size() || line[i] != ':') {
+        return std::nullopt;
+    }
+    ParsedMatch pm;
+    pm.file = std::string(line.substr(0, sep_pos));
+    try {
+        pm.line_num = static_cast<std::size_t>(
+            std::stoull(std::string(line.substr(start_digits, i - start_digits))));
+    } catch (...) {
+        return std::nullopt;
+    }
+    pm.content = std::string(line.substr(i + 1));
+    return pm;
+}
+
+}  // namespace
+
+// Accepts both formats real-world rg/grep emit:
+//   - NUL-separated (rg -Z, grep --null): `file\0line:content`
+//   - Colon-separated:                    `file:line:content`
+// In the colon case, filenames can themselves contain colons, so we
+// scan colon-by-colon until the digits-then-colon shape lines up.
 std::optional<ParsedMatch> parse_match_line(std::string_view line) {
     if (auto nul = line.find('\0'); nul != std::string_view::npos && nul > 0) {
-        std::size_t i = nul + 1;
-        std::size_t start_digits = i;
-        while (i < line.size() && std::isdigit(static_cast<unsigned char>(line[i]))) ++i;
-        if (i > start_digits && i < line.size() && line[i] == ':') {
-            ParsedMatch pm;
-            pm.file = std::string(line.substr(0, nul));
-            try {
-                pm.line_num = static_cast<std::size_t>(
-                    std::stoull(std::string(line.substr(start_digits, i - start_digits))));
-            } catch (...) {
-                return std::nullopt;
-            }
-            pm.content = std::string(line.substr(i + 1));
-            return pm;
-        }
+        if (auto pm = try_parse_at(line, nul)) return pm;
+        // NUL was present but malformed — fall through to colon scan
+        // rather than fail (paranoid: some tools NUL-prefix path but
+        // still encode the rest in colon shape).
     }
 
-    std::size_t colon = line.find(':');
-    while (colon != std::string_view::npos && colon > 0) {
-        std::size_t i = colon + 1;
-        std::size_t start_digits = i;
-        while (i < line.size() && std::isdigit(static_cast<unsigned char>(line[i]))) ++i;
-        if (i > start_digits && i < line.size() && line[i] == ':') {
-            ParsedMatch pm;
-            pm.file = std::string(line.substr(0, colon));
-            try {
-                pm.line_num = static_cast<std::size_t>(
-                    std::stoull(std::string(line.substr(start_digits, i - start_digits))));
-            } catch (...) {
-                return std::nullopt;
-            }
-            pm.content = std::string(line.substr(i + 1));
-            return pm;
-        }
-        colon = line.find(':', colon + 1);
+    for (std::size_t colon = line.find(':');
+         colon != std::string_view::npos && colon > 0;
+         colon = line.find(':', colon + 1)) {
+        if (auto pm = try_parse_at(line, colon)) return pm;
     }
     return std::nullopt;
 }

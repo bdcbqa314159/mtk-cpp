@@ -38,7 +38,6 @@ const std::regex& ls_date_regex() {
 }
 
 using mtk::core::utils::starts_with;
-using mtk::core::utils::trim_copy;
 
 std::vector<std::string> split_whitespace(const std::string& s) {
     std::vector<std::string> parts;
@@ -157,78 +156,87 @@ std::string human_size(std::uint64_t bytes) {
     return std::string(buf);
 }
 
-CompactResult compact_ls(std::string_view raw, bool show_all, bool show_long) {
-    CompactResult r;
-    std::vector<std::pair<std::string, std::optional<std::string>>> dirs;
-    std::vector<std::tuple<std::string, std::string, std::optional<std::string>>> files;
+namespace {
+
+// Internal buckets used during compaction. Local to compact_ls — pulled
+// out so the loop body and the two formatters can share the same data.
+struct DirEntry {
+    std::string name;
+    std::optional<std::string> octal;
+};
+struct FileEntry {
+    std::string name;
+    std::string size;
+    std::optional<std::string> octal;
+};
+struct Buckets {
+    std::vector<DirEntry> dirs;
+    std::vector<FileEntry> files;
     std::unordered_map<std::string, std::size_t> by_ext;
     std::size_t lines_seen = 0;
     std::size_t dotdirs = 0;
+    std::size_t parsed_count = 0;
+};
 
-    for (const auto& line : mtk::core::utils::split_lines(raw)) {
+bool is_noise_dir(const std::string& name) {
+    for (const auto& n : noise_dirs()) {
+        if (name == n) return true;
+    }
+    return false;
+}
+
+std::string extension_of(const std::string& name) {
+    auto dot = name.rfind('.');
+    return (dot == std::string::npos) ? "no ext" : name.substr(dot);
+}
+
+Buckets bucket_lines(std::string_view raw, bool show_all, bool show_long) {
+    Buckets b;
+    for (const auto& line : mtk::core::utils::split_lines_view(raw)) {
         if (starts_with(line, "total ") || line.empty()) continue;
-        ++lines_seen;
-        auto parsed = parse_ls_line(line);
+        ++b.lines_seen;
+        auto parsed = parse_ls_line(std::string(line));
         if (!parsed) continue;
-        if (is_dotdir(parsed->name)) {
-            ++dotdirs;
-            continue;
-        }
-        ++r.parsed_count;
+        if (is_dotdir(parsed->name)) { ++b.dotdirs; continue; }
+        ++b.parsed_count;
 
-        if (!show_all) {
-            bool noise = false;
-            for (const auto& n : noise_dirs()) {
-                if (parsed->name == n) {
-                    noise = true;
-                    break;
-                }
-            }
-            if (noise) continue;
-        }
+        if (!show_all && is_noise_dir(parsed->name)) continue;
 
         std::optional<std::string> octal;
         if (show_long) octal = perms_to_octal(parsed->perms);
 
         if (parsed->type == 'd') {
-            dirs.emplace_back(parsed->name, std::move(octal));
+            b.dirs.push_back(DirEntry{parsed->name, std::move(octal)});
         } else {
-            std::string ext;
-            auto dot = parsed->name.rfind('.');
-            ext = (dot == std::string::npos) ? "no ext" : parsed->name.substr(dot);
-            ++by_ext[ext];
-            files.emplace_back(parsed->name, human_size(parsed->size), std::move(octal));
+            ++b.by_ext[extension_of(parsed->name)];
+            b.files.push_back(FileEntry{parsed->name, human_size(parsed->size),
+                                        std::move(octal)});
         }
     }
+    return b;
+}
 
-    if (dirs.empty() && files.empty()) {
-        if (lines_seen > 0 && r.parsed_count == 0) {
-            if (dotdirs == lines_seen) {
-                r.entries = "(empty)\n";
-            }
-            return r;
-        }
-        r.entries = "(empty)\n";
-        return r;
-    }
-
+std::string format_entries(const Buckets& b) {
     std::ostringstream entries;
-    for (const auto& [name, octal] : dirs) {
-        if (octal) entries << *octal << "  ";
-        entries << name << "/\n";
+    for (const auto& d : b.dirs) {
+        if (d.octal) entries << *d.octal << "  ";
+        entries << d.name << "/\n";
     }
-    for (const auto& [name, sz, octal] : files) {
-        if (octal) entries << *octal << "  ";
-        entries << name << "  " << sz << '\n';
+    for (const auto& f : b.files) {
+        if (f.octal) entries << *f.octal << "  ";
+        entries << f.name << "  " << f.size << '\n';
     }
-    r.entries = entries.str();
+    return entries.str();
+}
 
+std::string format_summary(const Buckets& b) {
     std::ostringstream summary;
-    summary << "\nSummary: " << files.size() << " files, " << dirs.size() << " dirs";
-    if (!by_ext.empty()) {
-        std::vector<std::pair<std::string, std::size_t>> ext_counts(by_ext.begin(), by_ext.end());
+    summary << "\nSummary: " << b.files.size() << " files, " << b.dirs.size() << " dirs";
+    if (!b.by_ext.empty()) {
+        std::vector<std::pair<std::string, std::size_t>> ext_counts(
+            b.by_ext.begin(), b.by_ext.end());
         std::sort(ext_counts.begin(), ext_counts.end(),
-                  [](const auto& a, const auto& b) { return a.second > b.second; });
+                  [](const auto& a, const auto& c) { return a.second > c.second; });
         constexpr auto kMaxExt = mtk::core::limits::ls::kExtSummaryMaxCount;
         summary << " (";
         for (std::size_t i = 0; i < std::min(kMaxExt, ext_counts.size()); ++i) {
@@ -241,7 +249,30 @@ CompactResult compact_ls(std::string_view raw, bool show_all, bool show_long) {
         summary << ')';
     }
     summary << '\n';
-    r.summary = summary.str();
+    return summary.str();
+}
+
+}  // namespace
+
+CompactResult compact_ls(std::string_view raw, bool show_all, bool show_long) {
+    auto b = bucket_lines(raw, show_all, show_long);
+
+    CompactResult r;
+    r.parsed_count = b.parsed_count;
+
+    if (b.dirs.empty() && b.files.empty()) {
+        // Empty if the directory was truly empty OR every line we saw
+        // was a dotdir (`.`, `..`). If we saw lines but parsed none AND
+        // not every unparsed line was a dotdir, we lost real content —
+        // bail without claiming "(empty)".
+        const bool truly_empty = b.lines_seen == 0;
+        const bool only_dotdirs = b.parsed_count == 0 && b.dotdirs == b.lines_seen;
+        if (truly_empty || only_dotdirs) r.entries = "(empty)\n";
+        return r;
+    }
+
+    r.entries = format_entries(b);
+    r.summary = format_summary(b);
     return r;
 }
 
