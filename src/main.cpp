@@ -18,6 +18,7 @@
 #include "core/audit.hpp"
 #include "core/default_registry.hpp"
 #include "core/exit_codes.hpp"
+#include "core/filter_cache.hpp"
 #include "core/registry.hpp"
 #include "core/run_context.hpp"
 #include "core/signals.hpp"
@@ -96,6 +97,7 @@ void print_help() {
         << "  mtk trust [path]                Allow .mtk/filters/ at <path> (default: cwd)\n"
         << "  mtk untrust [path]              Remove <path> from allow-list\n"
         << "  mtk trusted                     List trusted paths\n"
+        << "  mtk reload                      Invalidate + rebuild TOML-filter cache\n"
         << "  mtk stats                       Per-filter savings dashboard\n"
         << "  mtk tail [N]                    Last N audit events (default 10)\n"
         << "  mtk why <event-id>              Re-spool raw output of an event\n"
@@ -177,6 +179,26 @@ int run_untrust(const std::vector<std::string>& argv) {
     } else {
         std::cout << "mtk untrust: " << resolved << " not in allow-list\n";
     }
+    return 0;
+}
+
+int run_reload() {
+    // Per perf critic P2: invalidate the cache. Next mtk invocation will
+    // re-parse all TOMLs and rebuild the binary cache on the way out.
+    bool removed = mtk::core::filter_cache::invalidate();
+    if (removed) {
+        std::cout << "mtk reload: cache invalidated ("
+                  << mtk::core::filter_cache::cache_file()
+                  << " removed). Next invocation re-parses all TOML filters.\n";
+    } else {
+        std::cout << "mtk reload: no cache to invalidate ("
+                  << mtk::core::filter_cache::cache_file()
+                  << " does not exist). Next invocation will build one.\n";
+    }
+    // Eagerly rebuild now so the user sees parse errors immediately
+    // rather than on next dispatch.
+    (void)mtk::core::build_default_registry();
+    std::cout << "mtk reload: cache rebuilt.\n";
     return 0;
 }
 
@@ -730,6 +752,9 @@ int main(int argc, char** argv) {
     }
     if (args[0] == "trusted") {
         return run_trusted();
+    }
+    if (args[0] == "reload") {
+        return run_reload();
     }
     if (args[0] == "rewrite") {
         return run_rewrite(std::vector<std::string>(args.begin() + 1, args.end()));

@@ -40,6 +40,18 @@ public:
     // path of the originating TOML file, etc.
     [[nodiscard]] virtual std::string_view source() const noexcept = 0;
 
+    // Per perf critic B6: filters that match a single literal argv[0]
+    // (e.g. "ls", "grep", "git") override this to return that token.
+    // The registry uses it to skip `try_match` when argv[0] obviously
+    // doesn't match — avoids the regex/string-compare work in try_match
+    // for non-matching filters. Default returns empty (filter participates
+    // in every dispatch). Filters whose match is genuinely dynamic
+    // (TomlFilterAdapter with a complex regex, PassthroughFilter) should
+    // keep the default.
+    [[nodiscard]] virtual std::string_view literal_first_token() const noexcept {
+        return {};
+    }
+
     // Cheap. Must not throw (noexcept). Expensive setup (regex compile,
     // glob compile, TOML schema validation) MUST happen at registry
     // construction, not here. `argv` is the full command (argv[0] is the

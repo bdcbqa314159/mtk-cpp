@@ -118,6 +118,7 @@ set(MTK_CORE_SOURCES
     src/core/default_registry.cpp
     src/core/trust.cpp
     src/core/audit.cpp
+    src/core/filter_cache.cpp
 )
 
 set(MTK_CMD_SOURCES

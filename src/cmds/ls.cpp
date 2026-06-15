@@ -285,6 +285,7 @@ class LsFilter final : public mtk::core::Filter {
 public:
     [[nodiscard]] std::string_view name() const noexcept override { return "ls"; }
     [[nodiscard]] std::string_view source() const noexcept override { return "builtin"; }
+    [[nodiscard]] std::string_view literal_first_token() const noexcept override { return "ls"; }
 
     [[nodiscard]] std::optional<mtk::core::DispatchTokenPtr>
     try_match(const std::vector<std::string>& argv) const noexcept override {

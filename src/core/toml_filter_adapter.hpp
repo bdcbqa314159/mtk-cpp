@@ -17,6 +17,7 @@ public:
 
     [[nodiscard]] std::string_view name() const noexcept override;
     [[nodiscard]] std::string_view source() const noexcept override;
+    [[nodiscard]] std::string_view literal_first_token() const noexcept override;
     [[nodiscard]] std::optional<DispatchTokenPtr>
     try_match(const std::vector<std::string>& argv) const noexcept override;
     [[nodiscard]] mtk::core::exec::ExecOutcome
@@ -27,6 +28,7 @@ public:
 private:
     mtk::core::toml_filter::Filter data_;
     std::string source_path_;
+    std::string literal_token_;  // extracted from `^literal$` patterns; empty otherwise
 };
 
 }  // namespace mtk::core

@@ -33,6 +33,7 @@ on_empty = "[mtk: clean build]"
 TEST_CASE("toml_filter command_matches uses regex") {
     mtk::core::toml_filter::Filter f;
     f.match_command_pattern = "^make$";
+    mtk::core::toml_filter::compile(f);
     CHECK(mtk::core::toml_filter::command_matches(f, "make"));
     CHECK_FALSE(mtk::core::toml_filter::command_matches(f, "cmake"));
 }
@@ -42,6 +43,7 @@ TEST_CASE("toml_filter apply runs the pipeline") {
     f.strip_lines_matching = {"^DEBUG"};
     f.keep_lines_matching = {"error", "warning"};
     f.max_lines = 5;
+    mtk::core::toml_filter::compile(f);
 
     std::string input =
         "DEBUG: starting\n"
@@ -62,6 +64,7 @@ TEST_CASE("toml_filter apply uses on_empty when result is empty") {
     mtk::core::toml_filter::Filter f;
     f.keep_lines_matching = {"NEVERMATCHES_XYZ"};
     f.on_empty = "[mtk: nothing of note]";
+    mtk::core::toml_filter::compile(f);
     auto out = mtk::core::toml_filter::apply(f, "line a\nline b\n");
     CHECK(out == "[mtk: nothing of note]");
 }

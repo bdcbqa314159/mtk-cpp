@@ -4,10 +4,33 @@
 #include "cmds/grep.hpp"
 #include "cmds/ls.hpp"
 #include "core/config.hpp"
+#include "core/filter_cache.hpp"
 #include "core/passthrough_filter.hpp"
 #include "core/toml_filter_adapter.hpp"
 
 namespace mtk::core {
+
+namespace {
+
+void register_user_filters(Registry& reg, std::vector<toml_filter::Filter>& tomls) {
+    for (auto& t : tomls) {
+        std::string source = "user:" + t.name;
+        reg.register_filter(
+            std::make_unique<TomlFilterAdapter>(std::move(t), std::move(source)),
+            Tier::UserToml);
+    }
+}
+
+void register_project_filters(Registry& reg, std::vector<toml_filter::Filter>& tomls) {
+    for (auto& t : tomls) {
+        std::string source = "project:" + t.name;
+        reg.register_filter(
+            std::make_unique<TomlFilterAdapter>(std::move(t), std::move(source)),
+            Tier::ProjectToml);
+    }
+}
+
+}  // namespace
 
 Registry build_default_registry() {
     Registry reg;
@@ -18,26 +41,37 @@ Registry build_default_registry() {
     mtk::cmds::ls::register_builtins(reg);
     mtk::cmds::grep::register_builtins(reg);
 
-    // Tier::UserToml — TOML filters from ~/.config/mtk/filters/. Always loaded.
-    auto user_tomls = mtk::core::config::load_user_filters();
-    for (auto& t : user_tomls) {
-        std::string source = "user:" + t.name;
-        reg.register_filter(
-            std::make_unique<TomlFilterAdapter>(std::move(t), std::move(source)),
-            Tier::UserToml);
+    // Per perf critic P2: try the binary cache first. Manifest covers
+    // every TOML file we'd load — any mtime/size change invalidates,
+    // forcing a fresh parse.
+    auto user_paths = mtk::core::config::user_filter_paths();
+    auto project_paths = mtk::core::config::project_filter_paths();
+    std::vector<std::filesystem::path> all_paths;
+    all_paths.reserve(user_paths.size() + project_paths.size());
+    all_paths.insert(all_paths.end(), user_paths.begin(), user_paths.end());
+    all_paths.insert(all_paths.end(), project_paths.begin(), project_paths.end());
+
+    auto manifest = mtk::core::filter_cache::make_manifest(all_paths);
+
+    std::vector<mtk::core::toml_filter::Filter> user_tomls;
+    std::vector<mtk::core::toml_filter::Filter> project_tomls;
+
+    if (mtk::core::filter_cache::is_valid(manifest)) {
+        auto loaded = mtk::core::filter_cache::load();
+        user_tomls = std::move(loaded.user_filters);
+        project_tomls = std::move(loaded.project_filters);
+    } else {
+        // Slow path: parse the TOML files fresh, then write the cache so
+        // the next invocation hits the fast path.
+        user_tomls = mtk::core::config::load_user_filters();
+        // load_project_filters does the trust check + nag; matches our
+        // project_paths empty/non-empty.
+        project_tomls = mtk::core::config::load_project_filters();
+        mtk::core::filter_cache::save(manifest, user_tomls, project_tomls);
     }
 
-    // Tier::ProjectToml — TOML filters from <cwd>/.mtk/filters/. Per A2:
-    // gated on trust (mtk trust . / mtk untrust . / MTK_ALLOW_PROJECT_FILTERS=1).
-    // Registry::register_filter rejects any project filter whose name() matches
-    // a final built-in — A2's shadow-prohibition.
-    auto project_tomls = mtk::core::config::load_project_filters();
-    for (auto& t : project_tomls) {
-        std::string source = "project:" + t.name;
-        reg.register_filter(
-            std::make_unique<TomlFilterAdapter>(std::move(t), std::move(source)),
-            Tier::ProjectToml);
-    }
+    register_user_filters(reg, user_tomls);
+    register_project_filters(reg, project_tomls);
 
     // Tier::Fallback — always-match passthrough.
     reg.register_filter(std::make_unique<PassthroughFilter>(), Tier::Fallback);

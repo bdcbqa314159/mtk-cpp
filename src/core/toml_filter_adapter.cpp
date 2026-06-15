@@ -6,9 +6,29 @@ namespace mtk::core {
 
 namespace ex = mtk::core::exec;
 
+namespace {
+// Per perf critic B6: if a TOML's match_command_pattern is a simple
+// anchored literal (`^[A-Za-z0-9_-]+$`), extract the literal so the
+// registry can skip try_match for non-matching argv[0]. Complex regexes
+// fall back to empty (filter participates in every dispatch).
+std::string extract_literal_anchor(std::string_view pat) {
+    if (pat.size() < 3) return {};
+    if (pat.front() != '^' || pat.back() != '$') return {};
+    auto inner = pat.substr(1, pat.size() - 2);
+    for (char c : inner) {
+        if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-')) {
+            return {};
+        }
+    }
+    return std::string(inner);
+}
+}  // namespace
+
 TomlFilterAdapter::TomlFilterAdapter(mtk::core::toml_filter::Filter data,
                                      std::string source_path)
-    : data_(std::move(data)), source_path_(std::move(source_path)) {}
+    : data_(std::move(data)),
+      source_path_(std::move(source_path)),
+      literal_token_(extract_literal_anchor(data_.match_command_pattern)) {}
 
 std::string_view TomlFilterAdapter::name() const noexcept {
     return data_.name;
@@ -16,6 +36,10 @@ std::string_view TomlFilterAdapter::name() const noexcept {
 
 std::string_view TomlFilterAdapter::source() const noexcept {
     return source_path_;
+}
+
+std::string_view TomlFilterAdapter::literal_first_token() const noexcept {
+    return literal_token_;
 }
 
 std::optional<DispatchTokenPtr>

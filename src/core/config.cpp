@@ -1,5 +1,6 @@
 #include "core/config.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -83,6 +84,34 @@ std::vector<mtk::core::toml_filter::Filter> load_all_filters() {
                 std::make_move_iterator(project.begin()),
                 std::make_move_iterator(project.end()));
     return user;
+}
+
+namespace {
+std::vector<std::filesystem::path> list_toml_paths(const std::filesystem::path& dir) {
+    std::vector<std::filesystem::path> out;
+    std::error_code ec;
+    if (!std::filesystem::is_directory(dir, ec)) return out;
+    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+        if (!entry.is_regular_file()) continue;
+        if (entry.path().extension() != ".toml") continue;
+        out.push_back(entry.path());
+    }
+    std::sort(out.begin(), out.end());  // stable order for cache manifest
+    return out;
+}
+}  // namespace
+
+std::vector<std::filesystem::path> user_filter_paths() {
+    return list_toml_paths(filters_dir());
+}
+
+std::vector<std::filesystem::path> project_filter_paths() {
+    auto project_dir = std::filesystem::path(".mtk") / "filters";
+    std::error_code ec;
+    auto cwd = std::filesystem::current_path(ec);
+    if (ec) return {};
+    if (!mtk::core::trust::is_trusted(cwd)) return {};
+    return list_toml_paths(project_dir);
 }
 
 std::optional<mtk::core::toml_filter::Filter> find_filter_for(

@@ -20,6 +20,13 @@ std::vector<mtk::core::toml_filter::Filter> load_user_filters();
 // loaded; allow with: mtk trust .]` (only if the dir actually exists).
 std::vector<mtk::core::toml_filter::Filter> load_project_filters();
 
+// Enumerate the absolute paths of TOML files that would be loaded by
+// load_user_filters / load_project_filters. Used by the filter_cache
+// layer to build a stat manifest WITHOUT parsing the files. The project
+// helper returns empty when cwd is untrusted (matches load semantics).
+[[nodiscard]] std::vector<std::filesystem::path> user_filter_paths();
+[[nodiscard]] std::vector<std::filesystem::path> project_filter_paths();
+
 // Convenience: load_user_filters() + load_project_filters() concatenated.
 // Use the split variants when you need to know which tier a filter came
 // from (e.g., for registry registration with the correct Tier).

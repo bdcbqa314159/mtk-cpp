@@ -1,6 +1,5 @@
 #include "core/toml_filter.hpp"
 
-#include <regex>
 #include <sstream>
 #include <toml++/toml.hpp>
 
@@ -10,27 +9,16 @@ namespace mtk::core::toml_filter {
 
 namespace {
 
-bool any_regex_matches(const std::string& line, const std::vector<std::string>& patterns) {
-    for (const auto& pat : patterns) {
+bool any_regex_matches(const std::string& line, const std::vector<std::regex>& res) {
+    for (const auto& re : res) {
         try {
-            std::regex re(pat);
             if (std::regex_search(line, re)) return true;
         } catch (const std::regex_error&) {
-            // Bad pattern: treat as non-match. Filter must not block the user.
+            // Match failure with a compiled regex is rare (stack overflow
+            // on pathological input); treat as non-match.
         }
     }
     return false;
-}
-
-std::string regex_replace_safe(const std::string& input,
-                               const std::string& pattern,
-                               const std::string& replacement) {
-    try {
-        std::regex re(pattern);
-        return std::regex_replace(input, re, replacement);
-    } catch (const std::regex_error&) {
-        return input;
-    }
 }
 
 template <typename T>
@@ -53,7 +41,52 @@ std::vector<std::string> read_string_array(View node) {
     return out;
 }
 
+// Compile a single regex, returning std::nullopt on regex_error so we
+// silently skip bad patterns (filter must never block the user).
+std::optional<std::regex> try_compile(const std::string& pattern) {
+    if (pattern.empty()) return std::nullopt;
+    try {
+        return std::regex(pattern);
+    } catch (const std::regex_error&) {
+        return std::nullopt;
+    }
+}
+
 }  // namespace
+
+// Populate the *_re fields from the *_string fields. Public so tests /
+// programmatic Filter construction can call it. Called by parse_all()
+// automatically.
+void compile(Filter& f) {
+    f.match_command_re = try_compile(f.match_command_pattern);
+
+    f.replace_re.clear();
+    f.replace_re.reserve(f.replace.size());
+    for (const auto& [pat, rep] : f.replace) {
+        if (auto re = try_compile(pat)) {
+            f.replace_re.emplace_back(std::move(*re), rep);
+        }
+    }
+
+    if (f.match_output) {
+        const auto& [pat, msg] = *f.match_output;
+        if (auto re = try_compile(pat)) {
+            f.match_output_re = std::make_pair(std::move(*re), msg);
+        }
+    }
+
+    f.strip_lines_re.clear();
+    f.strip_lines_re.reserve(f.strip_lines_matching.size());
+    for (const auto& pat : f.strip_lines_matching) {
+        if (auto re = try_compile(pat)) f.strip_lines_re.push_back(std::move(*re));
+    }
+
+    f.keep_lines_re.clear();
+    f.keep_lines_re.reserve(f.keep_lines_matching.size());
+    for (const auto& pat : f.keep_lines_matching) {
+        if (auto re = try_compile(pat)) f.keep_lines_re.push_back(std::move(*re));
+    }
+}
 
 std::vector<Filter> parse_all(std::string_view toml_source) {
     std::vector<Filter> filters;
@@ -101,16 +134,16 @@ std::vector<Filter> parse_all(std::string_view toml_source) {
         f.max_lines = as_uint((*section)["max_lines"]);
         if (auto oe = (*section)["on_empty"].value<std::string>()) f.on_empty = *oe;
 
+        compile(f);
         filters.push_back(std::move(f));
     }
     return filters;
 }
 
 bool command_matches(const Filter& f, std::string_view cmd_name) {
-    if (f.match_command_pattern.empty()) return false;
+    if (!f.match_command_re) return false;
     try {
-        std::regex re(f.match_command_pattern);
-        return std::regex_search(std::string(cmd_name), re);
+        return std::regex_search(std::string(cmd_name), *f.match_command_re);
     } catch (const std::regex_error&) {
         return false;
     }
@@ -123,14 +156,17 @@ std::string apply(const Filter& f, std::string_view input) {
         s = mtk::core::utils::strip_ansi(s);
     }
 
-    for (const auto& [pat, rep] : f.replace) {
-        s = regex_replace_safe(s, pat, rep);
+    for (const auto& [re, rep] : f.replace_re) {
+        try {
+            s = std::regex_replace(s, re, rep);
+        } catch (const std::regex_error&) {
+            // Skip this replacement on runtime error.
+        }
     }
 
-    if (f.match_output) {
-        const auto& [pat, msg] = *f.match_output;
+    if (f.match_output_re) {
+        const auto& [re, msg] = *f.match_output_re;
         try {
-            std::regex re(pat);
             if (std::regex_search(s, re)) return msg;
         } catch (const std::regex_error&) {
         }
@@ -138,20 +174,20 @@ std::string apply(const Filter& f, std::string_view input) {
 
     auto lines = mtk::core::utils::split_lines(s);
 
-    if (!f.strip_lines_matching.empty()) {
+    if (!f.strip_lines_re.empty()) {
         std::vector<std::string> kept;
         kept.reserve(lines.size());
         for (auto& l : lines) {
-            if (!any_regex_matches(l, f.strip_lines_matching)) kept.push_back(std::move(l));
+            if (!any_regex_matches(l, f.strip_lines_re)) kept.push_back(std::move(l));
         }
         lines = std::move(kept);
     }
 
-    if (!f.keep_lines_matching.empty()) {
+    if (!f.keep_lines_re.empty()) {
         std::vector<std::string> kept;
         kept.reserve(lines.size());
         for (auto& l : lines) {
-            if (any_regex_matches(l, f.keep_lines_matching)) kept.push_back(std::move(l));
+            if (any_regex_matches(l, f.keep_lines_re)) kept.push_back(std::move(l));
         }
         lines = std::move(kept);
     }

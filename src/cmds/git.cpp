@@ -381,6 +381,7 @@ class GitLogFilter final : public mtk::core::Filter {
 public:
     [[nodiscard]] std::string_view name() const noexcept override { return "git_log"; }
     [[nodiscard]] std::string_view source() const noexcept override { return "builtin"; }
+    [[nodiscard]] std::string_view literal_first_token() const noexcept override { return "git"; }
 
     [[nodiscard]] std::optional<DispatchTokenPtr>
     try_match(const std::vector<std::string>& argv) const noexcept override {
@@ -426,6 +427,7 @@ class GitStatusFilter final : public mtk::core::Filter {
 public:
     [[nodiscard]] std::string_view name() const noexcept override { return "git_status"; }
     [[nodiscard]] std::string_view source() const noexcept override { return "builtin"; }
+    [[nodiscard]] std::string_view literal_first_token() const noexcept override { return "git"; }
 
     [[nodiscard]] std::optional<DispatchTokenPtr>
     try_match(const std::vector<std::string>& argv) const noexcept override {
@@ -494,6 +496,7 @@ class GitDiffFilter final : public mtk::core::Filter {
 public:
     [[nodiscard]] std::string_view name() const noexcept override { return "git_diff"; }
     [[nodiscard]] std::string_view source() const noexcept override { return "builtin"; }
+    [[nodiscard]] std::string_view literal_first_token() const noexcept override { return "git"; }
 
     [[nodiscard]] std::optional<DispatchTokenPtr>
     try_match(const std::vector<std::string>& argv) const noexcept override {
@@ -558,6 +561,7 @@ class GitShowFilter final : public mtk::core::Filter {
 public:
     [[nodiscard]] std::string_view name() const noexcept override { return "git_show"; }
     [[nodiscard]] std::string_view source() const noexcept override { return "builtin"; }
+    [[nodiscard]] std::string_view literal_first_token() const noexcept override { return "git"; }
 
     [[nodiscard]] std::optional<DispatchTokenPtr>
     try_match(const std::vector<std::string>& argv) const noexcept override {
