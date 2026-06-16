@@ -35,16 +35,18 @@ This is a clean-room C++17 reimplementation of [rtk-ai/rtk][rtk]
 ## Quick start
 
 ```sh
-git clone --recurse-submodules https://github.com/bdcbqa314159/mtk-cpp.git mtk
+git clone https://github.com/bdcbqa314159/mtk-cpp.git mtk
 cd mtk
-cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake -B build -DCMAKE_BUILD_TYPE=Release      # auto-fetches submodules on first run
 cmake --build build -j
 ctest --test-dir build --output-on-failure
 ./build/mtk --help
 ```
 
-If you can't reach `github.com` directly, see [INSTALL.md](INSTALL.md)
-for offline-friendly submodule setup.
+CMake's configure step auto-runs `git submodule update --init --recursive`
+when submodules are missing, so `--recurse-submodules` is not required.
+If you can't reach `github.com` directly (air-gapped build), see
+[INSTALL.md](INSTALL.md) for the offline tarball-drop fallback.
 
 ---
 

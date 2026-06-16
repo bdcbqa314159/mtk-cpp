@@ -48,15 +48,49 @@ configure_file(
     @ONLY
 )
 
-# ---------- submodule sanity check ----------
-foreach(dep CLI11 tomlplusplus reproc fmt doctest json)
+# ---------- submodule sanity check + auto-init ----------
+# Detect missing submodules; if we're in a git checkout, run
+# `git submodule update --init --recursive --depth 1` automatically so
+# `git clone` (without --recurse-submodules) + `cmake -B build` works
+# first try. Falls back to a clear error otherwise (downloaded tarball,
+# no git, offline, etc. — INSTALL.md covers the manual path).
+set(_mtk_third_party_deps CLI11 tomlplusplus reproc fmt doctest json)
+set(_mtk_missing_deps "")
+foreach(dep ${_mtk_third_party_deps})
     if(NOT EXISTS "${CMAKE_SOURCE_DIR}/third_party/${dep}/CMakeLists.txt")
-        message(FATAL_ERROR
-            "third_party/${dep}/ is empty or missing CMakeLists.txt — "
-            "run 'git submodule update --init --recursive' "
-            "or see INSTALL.md for manual setup.")
+        list(APPEND _mtk_missing_deps ${dep})
     endif()
 endforeach()
+
+if(_mtk_missing_deps)
+    if(GIT_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/.git")
+        message(STATUS "Submodules missing (${_mtk_missing_deps}); running "
+                       "'git submodule update --init --recursive --depth 1' ...")
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive --depth 1
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            RESULT_VARIABLE _mtk_submod_rc
+        )
+        if(NOT _mtk_submod_rc EQUAL 0)
+            message(FATAL_ERROR
+                "Automatic submodule init failed (likely offline / no GitHub "
+                "access). See INSTALL.md for the manual tarball-drop fallback.")
+        endif()
+        foreach(dep ${_mtk_missing_deps})
+            if(NOT EXISTS "${CMAKE_SOURCE_DIR}/third_party/${dep}/CMakeLists.txt")
+                message(FATAL_ERROR
+                    "third_party/${dep}/ still missing after auto-init. "
+                    "See INSTALL.md for manual setup.")
+            endif()
+        endforeach()
+    else()
+        message(FATAL_ERROR
+            "Submodules missing: ${_mtk_missing_deps}. "
+            "Not in a git checkout (or git not found) — auto-init unavailable. "
+            "Run 'git submodule update --init --recursive' from a clone, "
+            "or see INSTALL.md for the manual fallback.")
+    endif()
+endif()
 
 # ---------- third-party deps ----------
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
