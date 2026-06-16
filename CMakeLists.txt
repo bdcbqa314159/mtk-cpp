@@ -110,6 +110,7 @@ set(MTK_CORE_SOURCES
     src/core/toml_filter.cpp
     src/core/diagnostic.cpp
     src/core/exit_codes.cpp
+    src/core/exe_path.cpp
     src/core/run_context.cpp
     src/core/signals.cpp
     src/core/registry.cpp
@@ -130,6 +131,8 @@ set(MTK_CMD_SOURCES
     src/cmds/ls.cpp
     src/cmds/grep.cpp
     src/cmds/hook.cpp
+    src/cmds/init.cpp
+    src/cmds/meta.cpp
 )
 
 add_library(mtk_lib STATIC ${MTK_CORE_SOURCES} ${MTK_CMD_SOURCES})
