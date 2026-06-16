@@ -46,6 +46,25 @@ std::string json_escape(const std::filesystem::path& p) {
 }
 
 int run_init_claude() {
+#if defined(_WIN32)
+    std::cerr
+        << "mtk init claude: not supported on Windows native.\n"
+        << "\n"
+        << "The Claude Code hook is a bash script that calls `jq` to\n"
+        << "rewrite the PreToolUse JSON payload. cmd.exe / PowerShell\n"
+        << "can't run it. Two paths forward:\n"
+        << "\n"
+        << "  1. Install + use mtk inside WSL2 — the Linux build runs\n"
+        << "     natively and the bash hook works as-is.\n"
+        << "  2. Use MSYS2 / Git Bash — has both bash and jq; the hook\n"
+        << "     installs into your Windows user's ~/.claude/hooks/\n"
+        << "     and Claude Code picks it up.\n"
+        << "\n"
+        << "The Copilot integration (`mtk init copilot`) is JSON-only\n"
+        << "and works on Windows native — try that one if you're using\n"
+        << "GitHub Copilot.\n";
+    return mtk::core::exit_codes::kUsage;
+#else
     const char* home = std::getenv("HOME");
     if (!home) {
         std::cerr << "mtk init: $HOME not set\n";
@@ -138,6 +157,7 @@ int run_init_claude() {
               << "no PATH setup needed. Re-run `mtk init claude` if you\n"
               << "move the binary.\n";
     return 0;
+#endif
 }
 
 int run_init_copilot() {

@@ -4,10 +4,14 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
-#include <fcntl.h>
 #include <fstream>
 #include <nlohmann/json.hpp>
-#include <unistd.h>
+
+#if defined(_WIN32)
+#  include <io.h>
+#else
+#  include <unistd.h>  // for fileno
+#endif
 
 #include "core/platform/file_lock.hpp"
 #include "core/platform/paths.hpp"
@@ -175,65 +179,61 @@ std::filesystem::path payload_dir() {
 
 namespace {
 
+// Extract the platform-native file handle from a FILE* so we can pass it
+// to platform::lock_exclusive / same_file. Both POSIX `fileno` and the
+// Windows `_get_osfhandle(_fileno(...))` pair are documented "give me
+// the underlying OS handle"; the FILE* remains owner and free is via
+// fclose. The handle is invalidated when the FILE* is closed.
+mtk::core::platform::native_file_handle native_handle_of(std::FILE* f) noexcept {
+#if defined(_WIN32)
+    return reinterpret_cast<HANDLE>(::_get_osfhandle(::_fileno(f)));
+#else
+    return ::fileno(f);
+#endif
+}
+
 // Open the log for append, creating it (and the parent dir) if needed.
-// Returns -1 on failure. Caches "directory exists" via an atomic_flag
-// so the mkdir-p stat chain runs at most once per process (B4).
-int open_log_append(const std::filesystem::path& log) noexcept {
+// Returns nullptr on failure. Caches "directory exists" via an atomic
+// flag so the mkdir-p stat chain runs at most once per process (B4).
+std::FILE* open_log_append(const std::filesystem::path& log) noexcept {
     static std::atomic<bool> dir_known_good{false};
-    int fd = ::open(log.c_str(),
-                    O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
-    if (fd < 0 && errno == ENOENT &&
-        !dir_known_good.load(std::memory_order_acquire)) {
+    // "ab": binary + append. POSIX-mandated O_APPEND semantics (atomic
+    // append from concurrent writers); Windows MSVCRT honours the same
+    // contract.
+    std::FILE* f = std::fopen(log.string().c_str(), "ab");
+    if (!f && !dir_known_good.load(std::memory_order_acquire)) {
         std::error_code ec;
         std::filesystem::create_directories(log.parent_path(), ec);
-        fd = ::open(log.c_str(),
-                    O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
+        f = std::fopen(log.string().c_str(), "ab");
     }
-    if (fd >= 0) dir_known_good.store(true, std::memory_order_release);
-    return fd;
+    if (f) dir_known_good.store(true, std::memory_order_release);
+    return f;
 }
 
-// After rotate_if_needed moved the log aside, our fd may point at the
+// After rotate_if_needed moved the log aside, our FILE* may point at the
 // renamed .1 file. Drop it and reopen the canonical path. Returns the
-// new fd (with the exclusive lock re-acquired) or -1 on failure.
-// Caller must release the lock on the returned fd.
+// new FILE* (with the exclusive lock re-acquired) or nullptr on failure.
 //
 // Per correctness critic C-RoundE-2: identity-compare the open handle
-// against the on-disk path. The previous file_size==0 || ENOENT check
-// only caught the case where *we* did the rotation. A different process
-// that rotated between our open() and our lock acquisition leaves the
-// canonical log non-empty with our fd still pointing at .1; the loser
-// then writes events into the rotated file where they're invisible to
-// readers. `platform::same_file` handles the POSIX inode / Windows
-// file-index check uniformly.
-int reopen_after_rotate(int fd, const std::filesystem::path& log) noexcept {
-    if (mtk::core::platform::same_file(fd, log)) return fd;
-    ::close(fd);
-    fd = ::open(log.c_str(),
-                O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
-    if (fd < 0) return -1;
-    if (!mtk::core::platform::lock_exclusive(fd)) {
-        ::close(fd);
-        return -1;
+// against the on-disk path. `platform::same_file` handles the POSIX
+// inode / Windows file-index check uniformly.
+std::FILE* reopen_after_rotate(std::FILE* f, const std::filesystem::path& log) noexcept {
+    if (mtk::core::platform::same_file(native_handle_of(f), log)) return f;
+    std::fclose(f);
+    f = std::fopen(log.string().c_str(), "ab");
+    if (!f) return nullptr;
+    if (!mtk::core::platform::lock_exclusive(native_handle_of(f))) {
+        std::fclose(f);
+        return nullptr;
     }
-    return fd;
+    return f;
 }
 
-// EINTR-safe write of `data` to `fd`. Returns true if all bytes
-// landed, false on any non-EINTR write error.
-bool write_all(int fd, std::string_view data) noexcept {
-    auto remaining = data.size();
-    const char* p = data.data();
-    while (remaining > 0) {
-        ssize_t n = ::write(fd, p, remaining);
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            return false;
-        }
-        p += n;
-        remaining -= static_cast<std::size_t>(n);
-    }
-    return true;
+// Write the full record. fwrite returns items written; modern libcs
+// (glibc, libc++, MSVCRT) retry internally on EINTR / partial writes,
+// so a single call is sufficient.
+bool write_all(std::FILE* f, std::string_view data) noexcept {
+    return std::fwrite(data.data(), 1, data.size(), f) == data.size();
 }
 
 }  // namespace
@@ -253,11 +253,11 @@ bool append(const Event& event) noexcept {
         std::string line = serialise(stamped);
         line.push_back('\n');
 
-        int fd = open_log_append(log);
-        if (fd < 0) return false;
+        std::FILE* f = open_log_append(log);
+        if (!f) return false;
 
-        if (!mtk::core::platform::lock_exclusive(fd)) {
-            ::close(fd);
+        if (!mtk::core::platform::lock_exclusive(native_handle_of(f))) {
+            std::fclose(f);
             return false;
         }
 
@@ -266,13 +266,17 @@ bool append(const Event& event) noexcept {
         // (post-rotate) log, or it stalled on lock acquisition until
         // our rotate finished.
         rotate_if_needed(log);
-        fd = reopen_after_rotate(fd, log);
-        if (fd < 0) return false;
+        f = reopen_after_rotate(f, log);
+        if (!f) return false;
 
-        const bool ok = write_all(fd, line);
+        const bool ok = write_all(f, line);
+        // Drain libc buffer to the kernel before releasing the lock —
+        // otherwise another process could acquire the lock and read
+        // a partially-written record.
+        std::fflush(f);
 
-        mtk::core::platform::unlock(fd);
-        ::close(fd);
+        mtk::core::platform::unlock(native_handle_of(f));
+        std::fclose(f);
         return ok;
     } catch (...) {
         return false;

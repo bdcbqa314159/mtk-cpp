@@ -1,10 +1,26 @@
 #include "core/signals.hpp"
 
 #include <atomic>
-#include <csignal>
 #include <cstdlib>
 
+#if defined(__linux__) || defined(__APPLE__)
+#  include <csignal>
+#elif defined(_WIN32)
+// Windows port: this initial implementation is a deferred-version stub.
+// We rely on the CRT's default Ctrl-C handler to terminate the process
+// cleanly. No SIGINT/SIGTERM/SIGHUP forwarding to children, no
+// SIGPIPE→141 exit (Windows surfaces broken-pipe via WriteFile error
+// at the emit site, not as a signal). Upgrading to native
+// SetConsoleCtrlHandler-based delivery is a real design call —
+// SIGHUP and SIGPIPE have no Windows analog and CTRL_CLOSE_EVENT /
+// CTRL_LOGOFF_EVENT only fire in console apps.
+#else
+#  error "signals: unsupported platform"
+#endif
+
 namespace mtk::core::signals {
+
+#if defined(__linux__) || defined(__APPLE__)
 
 namespace {
 
@@ -87,5 +103,16 @@ int take() noexcept {
 bool any_pending() noexcept {
     return g_mask.load(std::memory_order_acquire) != 0;
 }
+
+#elif defined(_WIN32)
+
+// No-op stubs. CRT default handlers terminate the process on Ctrl-C;
+// other "signal-like" events are intentionally not surfaced in this
+// initial Windows port.
+void install() noexcept {}
+int take() noexcept { return 0; }
+bool any_pending() noexcept { return false; }
+
+#endif
 
 }  // namespace mtk::core::signals
