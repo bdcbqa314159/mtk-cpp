@@ -26,6 +26,11 @@ std::string extract_b_path(std::string_view diff_git_line) {
 // counters, hunk position) lives on the object, not as local vars +
 // captured lambdas. Two ordering touches (C4, P8) made the original
 // state-machine fragile enough to deserve naming.
+//
+// Per perf critic P3 (Round F): output accumulates into a single
+// std::string rather than vector<string>+join_lines. Saves one heap
+// alloc per emitted line plus the join_lines ostringstream pass; on a
+// 500-line diff that's a measurable ~20-50 µs.
 class DiffCompactor {
 public:
     DiffCompactor(std::size_t max_lines, std::size_t max_hunk_lines) noexcept
@@ -40,7 +45,7 @@ public:
             } else if (in_hunk_) {
                 on_hunk_body_line(line);
             }
-            if (result_.size() >= max_lines_) {
+            if (lines_emitted_ >= max_lines_) {
                 hit_global_cap_ = true;
                 break;
             }
@@ -54,21 +59,37 @@ public:
         flush_hunk_truncation();
         flush_file_summary();
         if (hit_global_cap_) {
-            result_.push_back("\n... (more changes truncated)");
+            emit_line_prefixed("\n", "... (more changes truncated)");
             was_truncated_ = true;
         }
         if (was_truncated_) {
-            result_.push_back("[full diff: mtk git diff --no-compact]");
+            emit_line("[full diff: mtk git diff --no-compact]");
         }
-        return mtk::core::utils::join_lines(result_);
+        return std::move(out_);
     }
 
 private:
+    // Append `line` (no internal newlines) as a new logical line in the
+    // output. Equivalent to the previous result_.push_back + join_lines:
+    // a '\n' separator is inserted between every two emitted lines, no
+    // trailing newline.
+    void emit_line(std::string_view line) {
+        if (lines_emitted_ > 0) out_ += '\n';
+        out_.append(line.data(), line.size());
+        ++lines_emitted_;
+    }
+    void emit_line_prefixed(std::string_view prefix, std::string_view line) {
+        if (lines_emitted_ > 0) out_ += '\n';
+        out_.append(prefix.data(), prefix.size());
+        out_.append(line.data(), line.size());
+        ++lines_emitted_;
+    }
+
     void on_file_header(std::string_view line) {
         flush_hunk_truncation();
         flush_file_summary();
         current_file_ = extract_b_path(line);
-        result_.push_back("\n" + current_file_);
+        emit_line_prefixed("\n", current_file_);  // leading \n = blank separator before each file
         added_ = 0;
         removed_ = 0;
         in_hunk_ = false;
@@ -79,7 +100,7 @@ private:
         flush_hunk_truncation();
         in_hunk_ = true;
         hunk_shown_ = 0;
-        result_.push_back("  " + std::string(line));
+        emit_line_prefixed("  ", line);
     }
 
     void on_hunk_body_line(std::string_view line) {
@@ -95,7 +116,7 @@ private:
             // one +/- line in this hunk — `hunk_shown_ > 0` is the
             // "we're inside meaningful content" gate.
             if (hunk_shown_ > 0) {
-                result_.push_back("  " + std::string(line));
+                emit_line_prefixed("  ", line);
                 ++hunk_shown_;
             }
         }
@@ -103,7 +124,7 @@ private:
 
     void emit_or_skip(std::string_view line) {
         if (hunk_shown_ < max_hunk_lines_) {
-            result_.push_back("  " + std::string(line));
+            emit_line_prefixed("  ", line);
             ++hunk_shown_;
         } else {
             ++hunk_skipped_;
@@ -112,8 +133,11 @@ private:
 
     void flush_hunk_truncation() {
         if (hunk_skipped_ > 0) {
-            result_.push_back(
-                "  ... (" + std::to_string(hunk_skipped_) + " lines truncated)");
+            if (lines_emitted_ > 0) out_ += '\n';
+            out_ += "  ... (";
+            out_ += std::to_string(hunk_skipped_);
+            out_ += " lines truncated)";
+            ++lines_emitted_;
             was_truncated_ = true;
             hunk_skipped_ = 0;
         }
@@ -121,15 +145,20 @@ private:
 
     void flush_file_summary() {
         if (!current_file_.empty() && (added_ > 0 || removed_ > 0)) {
-            result_.push_back(
-                "  +" + std::to_string(added_) + " -" + std::to_string(removed_));
+            if (lines_emitted_ > 0) out_ += '\n';
+            out_ += "  +";
+            out_ += std::to_string(added_);
+            out_ += " -";
+            out_ += std::to_string(removed_);
+            ++lines_emitted_;
         }
     }
 
     const std::size_t max_lines_;
     const std::size_t max_hunk_lines_;
-    std::vector<std::string> result_;
+    std::string out_;
     std::string current_file_;
+    std::size_t lines_emitted_ = 0;
     std::size_t added_ = 0;
     std::size_t removed_ = 0;
     std::size_t hunk_shown_ = 0;

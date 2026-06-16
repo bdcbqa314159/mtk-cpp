@@ -40,6 +40,11 @@ struct CompactResult {
     std::string entries;
     std::string summary;
     std::size_t parsed_count = 0;
+    // True iff bucket_lines saw any non-empty, non-"total " line that
+    // parse_ls_line could not decode (and was not a dotdir). Lets the
+    // dispatch shell decide "parser found nothing real → fall back to
+    // raw" without re-walking and re-regexing the same input.
+    bool has_unparseable = false;
 };
 
 CompactResult compact_ls(std::string_view raw, bool show_all, bool show_long);

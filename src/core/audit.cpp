@@ -9,7 +9,6 @@
 #include <fstream>
 #include <iomanip>
 #include <nlohmann/json.hpp>
-#include <random>
 #include <sstream>
 #include <sys/file.h>
 #include <sys/stat.h>
@@ -318,11 +317,26 @@ std::vector<Event> tail(std::size_t n) {
 }
 
 std::string make_event_id() {
-    static thread_local std::mt19937_64 rng{std::random_device{}()};
-    std::uniform_int_distribution<std::uint64_t> dist;
+    // Per perf critic P2 (Round F): SplitMix64 with a clock^pid seed
+    // costs one uint64_t of state and no syscalls. The previous
+    // mt19937_64 + random_device cost ~5-10 µs on first use (random_device
+    // opens /dev/urandom on macOS+libc++; the 5008-byte mt state init is
+    // a separate hit). Event-id collision space (48 bits) is unchanged;
+    // statistical quality is fine for non-cryptographic uniqueness.
+    static thread_local std::uint64_t state = []() noexcept -> std::uint64_t {
+        const auto t = std::chrono::steady_clock::now().time_since_epoch().count();
+        return static_cast<std::uint64_t>(t)
+             ^ (static_cast<std::uint64_t>(::getpid()) << 32)
+             ^ 0x9E3779B97F4A7C15ULL;
+    }();
+    state += 0x9E3779B97F4A7C15ULL;
+    std::uint64_t z = state;
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+    z = z ^ (z >> 31);
     char buf[20];
     std::snprintf(buf, sizeof(buf), "ev_%012llx",
-                  static_cast<unsigned long long>(dist(rng) & 0xFFFFFFFFFFFFULL));
+                  static_cast<unsigned long long>(z & 0xFFFFFFFFFFFFULL));
     return buf;
 }
 

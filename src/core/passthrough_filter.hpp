@@ -7,10 +7,11 @@ namespace mtk::core {
 // Registered at Tier::Fallback so it's checked last and only fires when no
 // other filter claimed the command.
 //
-// Returns a SpawnFailed-style ExecOutcome only when passthrough returns a
-// non-zero exit indicating spawn failure (127). Otherwise returns a Ran
-// with empty stdout/stderr (since passthrough inherits stdio and writes
-// directly) and the propagated exit code.
+// Always returns a Ran with empty stdout/stderr (passthrough inherits stdio
+// and writes directly to the user's terminal) and the propagated exit code.
+// Spawn-failure diagnostics are owned by RunContext::passthrough, which
+// writes to stderr and returns 127 — we can't distinguish that from a real
+// 127 exit at this layer and don't try.
 class PassthroughFilter final : public Filter {
 public:
     [[nodiscard]] std::string_view name() const noexcept override {

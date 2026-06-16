@@ -1,22 +1,9 @@
 #include <doctest/doctest.h>
 
-#include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <string>
 
 #include "cmds/ls.hpp"
-
-namespace {
-std::string read_fixture(const std::string& name) {
-    auto path = std::filesystem::path(MTK_FIXTURES_DIR) / name;
-    std::ifstream f(path);
-    REQUIRE_MESSAGE(f.good(), "fixture missing: " << path.string());
-    std::ostringstream os;
-    os << f.rdbuf();
-    return os.str();
-}
-}  // namespace
+#include "support/fixture.hpp"
 
 TEST_CASE("parse_args recognises short and long flag combinations") {
     using mtk::cmds::ls::internal::parse_args;

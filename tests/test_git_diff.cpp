@@ -1,23 +1,10 @@
 #include <doctest/doctest.h>
 
-#include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <string>
 
 #include "cmds/git.hpp"
 #include "core/utils.hpp"
-
-namespace {
-std::string read_fixture(const std::string& name) {
-    auto path = std::filesystem::path(MTK_FIXTURES_DIR) / name;
-    std::ifstream f(path);
-    REQUIRE_MESSAGE(f.good(), "fixture missing: " << path.string());
-    std::ostringstream os;
-    os << f.rdbuf();
-    return os.str();
-}
-}  // namespace
+#include "support/fixture.hpp"
 
 TEST_CASE("detect_diff_options sees --stat and --no-compact") {
     using mtk::cmds::git::internal::detect_diff_options;

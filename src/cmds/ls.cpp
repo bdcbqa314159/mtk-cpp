@@ -196,7 +196,7 @@ Buckets bucket_lines(std::string_view raw, bool show_all, bool show_long) {
         if (starts_with(line, "total ") || line.empty()) continue;
         ++b.lines_seen;
         auto parsed = parse_ls_line(std::string(line));
-        if (!parsed) continue;
+        if (!parsed) continue;  // unparseable; lines_seen - dotdirs - parsed_count counts these
         if (is_dotdir(parsed->name)) { ++b.dotdirs; continue; }
         ++b.parsed_count;
 
@@ -259,6 +259,7 @@ CompactResult compact_ls(std::string_view raw, bool show_all, bool show_long) {
 
     CompactResult r;
     r.parsed_count = b.parsed_count;
+    r.has_unparseable = b.lines_seen > b.dotdirs + b.parsed_count;
 
     if (b.dirs.empty() && b.files.empty()) {
         // Three "(empty)" cases (post-audit, restoring the all-noise
@@ -354,19 +355,11 @@ public:
             return outcome;  // fallback to raw per A4
         }
 
-        bool has_real_content = false;
-        for (const auto& line : mtk::core::utils::split_lines(ran->stdout_data)) {
-            if (line.empty()) continue;
-            if (line.substr(0, 6) == "total ") continue;
-            // Per A5 (correctness critic C12): is_dotdir now takes the
-            // extracted filename, so parse first.
-            auto parsed = internal::parse_ls_line(line);
-            if (parsed && internal::is_dotdir(parsed->name)) continue;
-            has_real_content = true;
-            break;
-        }
-        if (result.parsed_count == 0 && has_real_content) {
-            return outcome;  // parser found nothing — pass raw
+        // Per perf critic P1 (Round F): bucket_lines already saw every
+        // line; reusing its has_unparseable flag avoids a second
+        // split_lines + parse_ls_line regex walk over the same input.
+        if (result.parsed_count == 0 && result.has_unparseable) {
+            return outcome;  // parser found nothing real — pass raw
         }
 
         return mtk::core::exec::Ran{

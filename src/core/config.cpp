@@ -86,18 +86,19 @@ std::vector<mtk::core::toml_filter::Filter> load_org_filters() {
 
 std::vector<mtk::core::toml_filter::Filter> load_project_filters() {
     auto project_dir = std::filesystem::path(".mtk") / "filters";
+    // Per perf critic P4 (Round F): cheap stat first. is_trusted reads
+    // the allow-list file from disk; skip it entirely when the project
+    // has no .mtk/filters (the common case for any non-mtk-using repo).
+    std::error_code dir_ec;
+    if (!std::filesystem::is_directory(project_dir, dir_ec)) return {};
+
     std::error_code ec;
     auto cwd = std::filesystem::current_path(ec);
     if (ec) return {};
 
     if (!mtk::core::trust::is_trusted(cwd)) {
-        // Per A2: emit nag only if the directory exists (so trusted-but-empty
-        // projects don't get spammed).
-        std::error_code dir_ec;
-        if (std::filesystem::is_directory(project_dir, dir_ec)) {
-            std::cerr << "[mtk: project filters at " << project_dir
-                      << " were not loaded; allow with: mtk trust .]\n";
-        }
+        std::cerr << "[mtk: project filters at " << project_dir
+                  << " were not loaded; allow with: mtk trust .]\n";
         return {};
     }
     return load_from_dir(project_dir);
@@ -143,6 +144,10 @@ std::vector<std::filesystem::path> org_filter_paths() {
 
 std::vector<std::filesystem::path> project_filter_paths() {
     auto project_dir = std::filesystem::path(".mtk") / "filters";
+    // Per perf critic P4 (Round F): see comment in load_project_filters.
+    std::error_code dir_ec;
+    if (!std::filesystem::is_directory(project_dir, dir_ec)) return {};
+
     std::error_code ec;
     auto cwd = std::filesystem::current_path(ec);
     if (ec) return {};

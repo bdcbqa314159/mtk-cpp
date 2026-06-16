@@ -1,23 +1,10 @@
 #include <doctest/doctest.h>
 
-#include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <string>
 
 #include "cmds/grep.hpp"
 #include "core/utils.hpp"
-
-namespace {
-std::string read_fixture(const std::string& name) {
-    auto path = std::filesystem::path(MTK_FIXTURES_DIR) / name;
-    std::ifstream f(path, std::ios::binary);
-    REQUIRE_MESSAGE(f.good(), "fixture missing: " << path.string());
-    std::ostringstream os;
-    os << f.rdbuf();
-    return os.str();
-}
-}  // namespace
+#include "support/fixture.hpp"
 
 TEST_CASE("parse_match_line accepts NUL-separated rg/grep output") {
     using mtk::cmds::grep::internal::parse_match_line;
