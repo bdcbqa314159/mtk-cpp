@@ -154,6 +154,8 @@ set(MTK_CORE_SOURCES
     src/core/trust.cpp
     src/core/audit.cpp
     src/core/filter_cache.cpp
+    src/core/platform/paths.cpp
+    src/core/platform/file_lock.cpp
 )
 
 set(MTK_CMD_SOURCES

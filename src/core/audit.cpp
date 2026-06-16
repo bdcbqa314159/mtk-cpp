@@ -1,18 +1,17 @@
 #include "core/audit.hpp"
 
 #include <chrono>
-#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <fcntl.h>
 #include <fstream>
-#include <iomanip>
 #include <nlohmann/json.hpp>
-#include <sstream>
-#include <sys/file.h>
-#include <sys/stat.h>
 #include <unistd.h>
+
+#include "core/platform/file_lock.hpp"
+#include "core/platform/paths.hpp"
+#include "core/platform/process_id.hpp"
 
 namespace mtk::core::audit {
 
@@ -21,16 +20,6 @@ namespace {
 // Per A6 defaults; could move to core/limits.hpp under namespace audit{} later.
 constexpr std::size_t kRotationBytes   = 10 * 1024 * 1024;   // 10 MiB
 constexpr std::size_t kPayloadMaxBytes = 1  * 1024 * 1024;   // 1 MiB
-
-std::filesystem::path state_dir() {
-    if (const char* xdg = std::getenv("XDG_STATE_HOME")) {
-        return std::filesystem::path(xdg) / "mtk";
-    }
-    if (const char* home = std::getenv("HOME")) {
-        return std::filesystem::path(home) / ".local" / "state" / "mtk";
-    }
-    return std::filesystem::path(".local") / "state" / "mtk";
-}
 
 std::string format_iso_utc_now() {
     using namespace std::chrono;
@@ -177,11 +166,11 @@ std::optional<Event> deserialise(const std::string& line) {
 }  // namespace
 
 std::filesystem::path log_file() {
-    return state_dir() / "events.jsonl";
+    return mtk::core::platform::state_dir() / "events.jsonl";
 }
 
 std::filesystem::path payload_dir() {
-    return state_dir() / "payloads";
+    return mtk::core::platform::state_dir() / "payloads";
 }
 
 namespace {
@@ -206,32 +195,24 @@ int open_log_append(const std::filesystem::path& log) noexcept {
 
 // After rotate_if_needed moved the log aside, our fd may point at the
 // renamed .1 file. Drop it and reopen the canonical path. Returns the
-// new fd (with LOCK_EX re-acquired) or -1 on failure. Caller must
-// release the lock on the returned fd.
+// new fd (with the exclusive lock re-acquired) or -1 on failure.
+// Caller must release the lock on the returned fd.
 //
-// Per correctness critic C-RoundE-2: compare inodes (fstat vs stat) —
-// the previous file_size==0 || ENOENT check only caught the case where
-// *we* did the rotation. A different process that rotated between our
-// open() and our flock() acquisition leaves the canonical log non-empty
-// with our fd still pointing at .1; the loser then writes events into
-// the rotated file where they're invisible to readers.
+// Per correctness critic C-RoundE-2: identity-compare the open handle
+// against the on-disk path. The previous file_size==0 || ENOENT check
+// only caught the case where *we* did the rotation. A different process
+// that rotated between our open() and our lock acquisition leaves the
+// canonical log non-empty with our fd still pointing at .1; the loser
+// then writes events into the rotated file where they're invisible to
+// readers. `platform::same_file` handles the POSIX inode / Windows
+// file-index check uniformly.
 int reopen_after_rotate(int fd, const std::filesystem::path& log) noexcept {
-    struct ::stat fd_st{};
-    struct ::stat path_st{};
-    const bool fd_ok = ::fstat(fd, &fd_st) == 0;
-    const bool path_ok = ::stat(log.c_str(), &path_st) == 0;
-    // If path is missing, recreate it. If fd and path point to the same
-    // inode, we're fine. Anything else (different inodes, fstat fail) →
-    // reopen.
-    if (fd_ok && path_ok && fd_st.st_ino == path_st.st_ino &&
-        fd_st.st_dev == path_st.st_dev) {
-        return fd;
-    }
+    if (mtk::core::platform::same_file(fd, log)) return fd;
     ::close(fd);
     fd = ::open(log.c_str(),
                 O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
     if (fd < 0) return -1;
-    if (::flock(fd, LOCK_EX) != 0) {
+    if (!mtk::core::platform::lock_exclusive(fd)) {
         ::close(fd);
         return -1;
     }
@@ -275,22 +256,22 @@ bool append(const Event& event) noexcept {
         int fd = open_log_append(log);
         if (fd < 0) return false;
 
-        if (::flock(fd, LOCK_EX) != 0) {
+        if (!mtk::core::platform::lock_exclusive(fd)) {
             ::close(fd);
             return false;
         }
 
         // Rotation must happen under the lock so cross-process moves
         // are safe: process B's pending write either lands in the new
-        // (post-rotate) log, or it stalled in flock until our rotate
-        // finished.
+        // (post-rotate) log, or it stalled on lock acquisition until
+        // our rotate finished.
         rotate_if_needed(log);
         fd = reopen_after_rotate(fd, log);
         if (fd < 0) return false;
 
         const bool ok = write_all(fd, line);
 
-        (void)::flock(fd, LOCK_UN);
+        mtk::core::platform::unlock(fd);
         ::close(fd);
         return ok;
     } catch (...) {
@@ -326,7 +307,7 @@ std::string make_event_id() {
     static thread_local std::uint64_t state = []() noexcept -> std::uint64_t {
         const auto t = std::chrono::steady_clock::now().time_since_epoch().count();
         return static_cast<std::uint64_t>(t)
-             ^ (static_cast<std::uint64_t>(::getpid()) << 32)
+             ^ (static_cast<std::uint64_t>(mtk::core::platform::current_pid()) << 32)
              ^ 0x9E3779B97F4A7C15ULL;
     }();
     state += 0x9E3779B97F4A7C15ULL;
