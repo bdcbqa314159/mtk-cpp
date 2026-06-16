@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -12,6 +13,7 @@
 #include <utility>
 
 #include "core/audit.hpp"
+#include "core/color.hpp"
 #include "core/default_registry.hpp"
 #include "core/exit_codes.hpp"
 #include "core/filter_cache.hpp"
@@ -118,8 +120,10 @@ int run_untrust(const std::vector<std::string>& argv) {
 int run_trusted() {
     auto list = mtk::core::trust::list();
     if (list.empty()) {
-        std::cout << "(no trusted paths; "
-                  << mtk::core::trust::allowed_projects_file() << " is empty or absent)\n";
+        std::ostringstream msg;
+        msg << "(no trusted paths; "
+            << mtk::core::trust::allowed_projects_file() << " is empty or absent)";
+        std::cout << mtk::core::color::dim(msg.str()) << '\n';
         return 0;
     }
     std::cout << "Trusted paths (from "
@@ -177,8 +181,12 @@ int run_tail(const std::vector<std::string>& argv) {
     }
     auto events = mtk::core::audit::tail(n);
     if (events.empty()) {
-        std::cout << "(no audit events -- "
-                  << mtk::core::audit::log_file() << " is empty or absent)\n";
+
+        std::ostringstream msg;
+        msg << "(no audit events — "
+            << mtk::core::audit::log_file() << " is empty or absent)";
+        std::cout << mtk::core::color::dim(msg.str()) << '\n';
+        
         return 0;
     }
     for (const auto& e : events) {
@@ -202,8 +210,15 @@ int run_tail(const std::vector<std::string>& argv) {
 int run_stats() {
     auto events = mtk::core::audit::read_all();
     if (events.empty()) {
+<<<<<<< HEAD
         std::cout << "(no audit events -- "
                   << mtk::core::audit::log_file() << " is empty or absent)\n";
+=======
+        std::ostringstream msg;
+        msg << "(no audit events — "
+            << mtk::core::audit::log_file() << " is empty or absent)";
+        std::cout << mtk::core::color::dim(msg.str()) << '\n';
+>>>>>>> 1ba9d0d (phase 2 color: red on diag::emit (errors + spawn-fail), dim on tee hint / (empty) / 0 matches / (no audit events) / (no trusted paths), yellow on trust nag; also route exec::passthrough's command-not-found through diag::emit so it picks up the color policy)
         return 0;
     }
 

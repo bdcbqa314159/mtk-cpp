@@ -6,6 +6,7 @@
 #include <reproc++/drain.hpp>
 #include <reproc++/reproc.hpp>
 
+#include "core/diagnostic.hpp"
 #include "core/limits.hpp"
 #include "core/signals.hpp"
 
@@ -37,11 +38,14 @@ int passthrough(const std::vector<std::string>& argv) {
     opts.stop = staged_stop();
 
     if (auto ec = proc.start(argv, opts)) {
+        // Route through diag::emit so output picks up the color policy
+        // — was direct fprintf, which bypassed the color wrapper.
         if (ec == std::errc::no_such_file_or_directory) {
-            std::fprintf(stderr, "mtk %s: command not found in PATH\n", argv[0].c_str());
+            mtk::core::diag::emit(argv[0], "command not found in PATH");
         } else {
-            std::fprintf(stderr, "mtk %s: failed to spawn: %s\n", argv[0].c_str(),
-                         ec.message().c_str());
+            std::string msg = "failed to spawn: ";
+            msg.append(ec.message());
+            mtk::core::diag::emit(argv[0], msg);
         }
         return 127;
     }

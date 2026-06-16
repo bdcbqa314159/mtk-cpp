@@ -4,6 +4,7 @@
 #include <fmt/format.h>
 #include <fstream>
 
+#include "core/color.hpp"
 #include "core/limits.hpp"
 #include "core/platform/paths.hpp"
 #include "core/platform/process_id.hpp"
@@ -65,7 +66,8 @@ std::optional<std::string> tee_and_hint(std::string_view raw,
     f.write(raw.data(), static_cast<std::streamsize>(raw.size()));
     if (!f) return std::nullopt;
 
-    return fmt::format("[mtk: full output saved to {}]", path.string());
+    return mtk::core::color::dim(
+        fmt::format("[mtk: full output saved to {}]", path.string()));
 }
 
 }  // namespace mtk::core::tee

@@ -7,6 +7,7 @@
 #include <sstream>
 #include <unordered_map>
 
+#include "core/color.hpp"
 #include "core/exec.hpp"
 #include "core/exit_codes.hpp"
 #include "core/filter.hpp"
@@ -275,7 +276,9 @@ CompactResult compact_ls(std::string_view raw, bool show_all, bool show_long) {
         const bool truly_empty = b.lines_seen == 0;
         const bool only_dotdirs = b.parsed_count == 0 && b.dotdirs == b.lines_seen;
         const bool all_noise = b.parsed_count > 0;
-        if (truly_empty || only_dotdirs || all_noise) r.entries = "(empty)\n";
+        if (truly_empty || only_dotdirs || all_noise) {
+            r.entries = mtk::core::color::dim("(empty)") + "\n";
+        }
         return r;
     }
 

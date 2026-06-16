@@ -6,6 +6,7 @@
 #include <sstream>
 
 #include "core/platform/paths.hpp"
+#include "core/color.hpp"
 #include "core/trust.hpp"
 
 namespace mtk::core::config {
@@ -86,8 +87,13 @@ std::vector<mtk::core::toml_filter::Filter> load_project_filters() {
     if (ec) return {};
 
     if (!mtk::core::trust::is_trusted(cwd)) {
-        std::cerr << "[mtk: project filters at " << project_dir
-                  << " were not loaded; allow with: mtk trust .]\n";
+        // Yellow on TTY — this is a warning the user should notice
+        // (they have project filters but they're not loading) but it's
+        // not an error.
+        std::ostringstream nag;
+        nag << "[mtk: project filters at " << project_dir
+            << " were not loaded; allow with: mtk trust .]";
+        std::cerr << mtk::core::color::yellow(nag.str()) << '\n';
         return {};
     }
     return load_from_dir(project_dir);
