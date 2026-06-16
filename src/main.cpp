@@ -681,47 +681,13 @@ int dispatch(const std::vector<std::string>& argv) {
                   << "' (source: " << filter_source << ")\n";
     }
 
+    // Per audit: post-run choreography (timing, outcome introspection,
+    // payload capture, emit, audit) lives in RunContext::run_and_audit
+    // — the dispatcher no longer reaches into the outcome to assemble
+    // the AuditEvent itself.
     mtk::core::RunContext ctx;
-    auto start = std::chrono::steady_clock::now();
-    auto outcome = match.filter->run(std::move(match.token), argv, ctx);
-
-    // Capture audit fields BEFORE emit consumes the outcome.
-    std::size_t bytes_out = 0;
-    bool timed_out = false;
-    int killed_by_signal = 0;
-    bool bytes_in_capped = false;
-    if (const auto* ran = ctx.as_ran(outcome)) {
-        bytes_out = ran->stdout_data.size() + ran->stderr_data.size();
-        timed_out = ran->timed_out;
-        killed_by_signal = ran->killed_by_signal;
-        bytes_in_capped = ran->truncated;
-    }
-
-    // Optional payload capture under MTK_AUDIT_PAYLOAD=1.
-    auto event_id = mtk::core::audit::make_event_id();
-    if (const auto* ran = ctx.as_ran(outcome)) {
-        (void)mtk::core::audit::capture_payload(event_id, ran->stdout_data);
-    }
-
-    int exit_code = ctx.emit(std::move(outcome), filter_name);
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start).count();
-
-    ctx.audit(mtk::core::RunContext::AuditEvent{
-        event_id,
-        filter_name,
-        filter_source,
-        argv,
-        exit_code,
-        /*bytes_in*/ 0,  // 0 = take from cumulative_bytes_in()
-        bytes_out,
-        static_cast<long>(elapsed),
-        bytes_in_capped,
-        timed_out,
-        killed_by_signal,
-    });
-
-    return exit_code;
+    return ctx.run_and_audit(*match.filter, std::move(match.token), argv,
+                             filter_name, filter_source);
 }
 
 }  // namespace

@@ -164,14 +164,16 @@ ExecOutcome capture_outcome(const std::vector<std::string>& argv,
         ran.exit_code = 128 + ran.killed_by_signal;
     }
 
-    // Fallback for the case PATH resolution can't catch: fork succeeded but
-    // execvp inside the child failed silently (e.g., race conditions with
-    // PATH changes between resolve and exec, exec-bit missing, ENOEXEC).
-    // The child immediately exits 127 with no output in this case.
-    if (ran.exit_code == 127 && ran.stdout_data.empty() && ran.stderr_data.empty() &&
-        !ran.truncated && !ran.timed_out && ran.killed_by_signal == 0) {
-        return SpawnFailed{"command not found in PATH: " + argv[0]};
-    }
+    // Per audit: the previous "exit=127 + empty pipes → SpawnFailed"
+    // backstop was a defense-in-depth check for execvp-failure-in-child
+    // scenarios that reproc supposedly couldn't catch. It produced a
+    // false positive for any program that legitimately exits 127 with
+    // no output (`bash -c 'exit 127'`, shell sentinels, makefile
+    // wrappers). Reproc's `start()` error pipe reliably reports exec
+    // failures via ec — see the start() check above — so the backstop
+    // was both defensive and wrong. Dropped: a real exit=127 from a
+    // running program now flows through as Ran with exit_code=127,
+    // matching the user's mental model.
     return ran;
 }
 

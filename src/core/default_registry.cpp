@@ -48,18 +48,25 @@ void register_project_filters(Registry& reg, std::vector<toml_filter::Filter>& t
 Registry build_default_registry() {
     Registry reg;
 
+    // Per A7 + audit: load org filters BEFORE builtins so that a
+    // `locked = true` org filter actually blocks the same-name builtin
+    // from registering. The previous ordering (builtins-first) meant
+    // org "locked" only outranked at find-time, not at registration —
+    // the builtin still appeared in `describe()` as shadowed rather
+    // than being absent. With this order, the registry shadow check
+    // (which only inspects filters AT THE TIME of registration) sees
+    // the locked org filter first and rejects the builtin attempt.
+    // Always loaded fresh — never cached, since /etc/mtk is root-
+    // owned and a stale cache could mask a policy update.
+    auto org_tomls = mtk::core::config::load_org_filters();
+    register_org_filters(reg, org_tomls);
+
     // Tier::Builtin — dedicated C++ filters, final (cannot be shadowed by
-    // project TOML per A2).
+    // project TOML per A2). A locked org filter at the same name will
+    // cause register_filter to reject this attempt (with a stderr line).
     mtk::cmds::git::register_builtins(reg);
     mtk::cmds::ls::register_builtins(reg);
     mtk::cmds::grep::register_builtins(reg);
-
-    // Per A7: org filters always loaded fresh — they're root-owned in
-    // /etc and shouldn't be cached in the user's cache dir (a stale
-    // cache could mask a policy update). They're typically a small
-    // handful, parse cost is negligible.
-    auto org_tomls = mtk::core::config::load_org_filters();
-    register_org_filters(reg, org_tomls);
 
     // Per perf critic P2: try the binary cache first. Manifest covers
     // every TOML file we'd load — any mtime/size change invalidates,

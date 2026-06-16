@@ -22,6 +22,14 @@ enum class Tier : int {
 // Lower numeric value = checked FIRST (org overrides built-in overrides user etc.).
 // We iterate in ascending Tier order during dispatch.
 
+// Convention: `a` has higher priority than `b` when its enumerator is
+// numerically smaller. Centralised so the convention is named in one
+// place — a sign flip in this function is the kind of bug that would
+// silently invert the entire dispatch hierarchy.
+[[nodiscard]] constexpr bool higher_priority_than(Tier a, Tier b) noexcept {
+    return static_cast<int>(a) < static_cast<int>(b);
+}
+
 struct RegisteredFilter {
     std::unique_ptr<Filter> filter;
     Tier tier;
@@ -38,10 +46,31 @@ public:
     Registry& operator=(Registry&&) = default;
 
     // Adds a filter to the registry. Rejects (logs to stderr, returns
-    // false, drops the filter) if:
-    //   - a filter with the same name() exists at the same tier
-    //   - the filter is at ProjectToml tier and a Builtin filter with the
-    //     same name() exists (A2's shadowing prohibition)
+    // false, drops the filter) when EITHER:
+    //   - a filter with the same name() is already registered at the
+    //     same tier (duplicate per-tier names are never allowed); OR
+    //   - an `is_final` filter with the same name() is already
+    //     registered at any HIGHER-priority tier (lower numeric Tier
+    //     value). This is the generalised A7 shadow rule: it blocks a
+    //     same-name registration further down the priority chain.
+    //
+    // Concretely:
+    //   - Builtins are registered with is_final=true, so a ProjectToml
+    //     filter trying the same name is rejected (A2 silent-shadow
+    //     protection).
+    //   - An OrgToml filter with `locked = true` is registered with
+    //     is_final=true, so a same-name Builtin / UserToml / ProjectToml
+    //     is rejected. NOTE: this requires the org filter to be
+    //     registered first — default_registry.cpp loads org BEFORE
+    //     builtins to make this work at registration time, not just at
+    //     find-time.
+    //
+    // The check inspects only filters already registered when this is
+    // called — registration order matters. A later same-name attempt at
+    // a higher-priority tier does NOT retroactively evict a prior
+    // lower-priority registration; instead it succeeds and is_final
+    // (if set) starts gating subsequent attempts.
+    //
     // Return value is documentary — call sites don't currently check it
     // (registration happens at startup; failure logs to stderr). Leaving
     // it without [[nodiscard]] preserves the existing "best-effort

@@ -10,8 +10,16 @@
 namespace mtk::cmds::git {
 
 // Registers GitLogFilter, GitStatusFilter, GitDiffFilter, GitShowFilter
-// into the given registry at Tier::Builtin with is_final=true.
+// into the given registry at Tier::Builtin with is_final=true. Calls
+// each per-filter registrar below. Per audit: the four filters live in
+// separate translation units so a fix to (e.g.) status parsing doesn't
+// recompile log/diff/show — keeps blast radius matched to the change.
 void register_builtins(mtk::core::Registry& reg);
+
+void register_log(mtk::core::Registry& reg);
+void register_status(mtk::core::Registry& reg);
+void register_diff(mtk::core::Registry& reg);
+void register_show(mtk::core::Registry& reg);
 
 namespace internal {
 

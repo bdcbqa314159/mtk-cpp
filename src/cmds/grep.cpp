@@ -55,12 +55,16 @@ std::optional<ParsedMatch> try_parse_at(std::string_view line, std::size_t sep_p
 //   - Colon-separated:                    `file:line:content`
 // In the colon case, filenames can themselves contain colons, so we
 // scan colon-by-colon until the digits-then-colon shape lines up.
+//
+// Per audit: when NUL is present but malformed, return nullopt rather
+// than falling through to the colon scan. The colon scan could find a
+// colon BEFORE the NUL and synthesise a confidently-wrong attribution
+// (e.g. `weird:42:rest\0broken:7:more` was parsing as file="weird",
+// line=42). No real-world rg/grep emits malformed-NUL output — the
+// fallthrough was speculative generality.
 std::optional<ParsedMatch> parse_match_line(std::string_view line) {
     if (auto nul = line.find('\0'); nul != std::string_view::npos && nul > 0) {
-        if (auto pm = try_parse_at(line, nul)) return pm;
-        // NUL was present but malformed — fall through to colon scan
-        // rather than fail (paranoid: some tools NUL-prefix path but
-        // still encode the rest in colon shape).
+        return try_parse_at(line, nul);
     }
 
     for (std::size_t colon = line.find(':');

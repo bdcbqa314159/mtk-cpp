@@ -36,8 +36,8 @@ bool Registry::register_filter(std::unique_ptr<Filter> f, Tier tier, bool is_fin
     }
 
     // Per A7: generalised shadowing prohibition. An `is_final` filter at
-    // ANY higher-priority tier (lower Tier number) blocks lower-priority
-    // tiers from registering the same name. Two existing uses today:
+    // ANY higher-priority tier blocks lower-priority tiers from
+    // registering the same name. Two existing uses today:
     //   - Builtin (is_final=true via cmds/*.cpp register_builtins) blocks
     //     ProjectToml from defining e.g. its own `git_log` (closes A2's
     //     silent-shadow attack).
@@ -45,7 +45,7 @@ bool Registry::register_filter(std::unique_ptr<Filter> f, Tier tier, bool is_fin
     //     blocks Builtin, UserToml, and ProjectToml from same-name
     //     registration — lets an org pin an authoritative pipeline.
     for (const auto& rf : filters_) {
-        if (static_cast<int>(rf.tier) < static_cast<int>(tier) &&
+        if (higher_priority_than(rf.tier, tier) &&
             rf.is_final &&
             rf.filter->name() == new_name) {
             std::cerr << "mtk registry: rejected '" << new_name
@@ -96,14 +96,16 @@ std::vector<Registry::Entry> Registry::describe() const {
     std::vector<Entry> out;
     out.reserve(filters_.size());
 
-    // For shadow detection: for each filter, check whether another filter
-    // at a strictly higher-priority tier has the same name.
+    // For shadow detection: for each filter, check whether another
+    // filter at a strictly higher-priority tier has the same name.
+    // Note: unlike register_filter's check, this is NOT is_final-gated
+    // — describe() reports any-name shadowing for `mtk explain`,
+    // regardless of whether the higher-pri filter opted into is_final.
     for (std::size_t i = 0; i < filters_.size(); ++i) {
         bool shadowed = false;
         for (std::size_t j = 0; j < filters_.size(); ++j) {
             if (i == j) continue;
-            if (static_cast<int>(filters_[j].tier) <
-                    static_cast<int>(filters_[i].tier) &&
+            if (higher_priority_than(filters_[j].tier, filters_[i].tier) &&
                 filters_[j].filter->name() == filters_[i].filter->name()) {
                 shadowed = true;
                 break;

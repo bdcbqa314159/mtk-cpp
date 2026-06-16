@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -6,6 +7,10 @@
 #include "core/exec.hpp"
 
 namespace mtk::core {
+
+class Filter;
+struct DispatchToken;
+using DispatchTokenPtr = std::unique_ptr<DispatchToken>;
 
 // RunContext is the per-invocation execution environment a filter operates
 // in. Owns spawn, tee, audit, settings, and sinks (per A1). Filters never
@@ -98,6 +103,18 @@ public:
     // (git status, pre-Round-D git show) don't lose the truncation
     // signal from intermediate captures whose Ran the caller discards.
     [[nodiscard]] bool any_capture_truncated() const noexcept;
+
+    // Per audit: orchestrates the full per-invocation lifecycle inside
+    // RunContext, so the dispatcher doesn't have to know about audit
+    // field layout / payload capture / chrono timing / sticky flags.
+    // Sequence: clock-start → filter.run() → snapshot outcome fields →
+    // payload capture (env-gated) → emit (consumes outcome) → clock-
+    // stop → audit append. Returns the exit code to propagate.
+    int run_and_audit(Filter& filter,
+                      DispatchTokenPtr token,
+                      const std::vector<std::string>& argv,
+                      std::string_view filter_name,
+                      std::string_view filter_source) noexcept;
 
 private:
     std::size_t cumulative_in_bytes_ = 0;

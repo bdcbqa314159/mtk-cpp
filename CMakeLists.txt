@@ -123,6 +123,10 @@ set(MTK_CORE_SOURCES
 
 set(MTK_CMD_SOURCES
     src/cmds/git.cpp
+    src/cmds/git_log.cpp
+    src/cmds/git_status.cpp
+    src/cmds/git_diff.cpp
+    src/cmds/git_show.cpp
     src/cmds/ls.cpp
     src/cmds/grep.cpp
     src/cmds/hook.cpp

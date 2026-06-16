@@ -184,87 +184,100 @@ std::filesystem::path payload_dir() {
     return state_dir() / "payloads";
 }
 
+namespace {
+
+// Open the log for append, creating it (and the parent dir) if needed.
+// Returns -1 on failure. Caches "directory exists" via an atomic_flag
+// so the mkdir-p stat chain runs at most once per process (B4).
+int open_log_append(const std::filesystem::path& log) noexcept {
+    static std::atomic<bool> dir_known_good{false};
+    int fd = ::open(log.c_str(),
+                    O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
+    if (fd < 0 && errno == ENOENT &&
+        !dir_known_good.load(std::memory_order_acquire)) {
+        std::error_code ec;
+        std::filesystem::create_directories(log.parent_path(), ec);
+        fd = ::open(log.c_str(),
+                    O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
+    }
+    if (fd >= 0) dir_known_good.store(true, std::memory_order_release);
+    return fd;
+}
+
+// After rotate_if_needed moved the log aside, our fd points at the
+// renamed .1 file. Drop it and reopen the canonical path. Returns the
+// new fd (with LOCK_EX re-acquired) or -1 on failure. Caller must
+// release the lock on the returned fd.
+int reopen_after_rotate(int fd, const std::filesystem::path& log) noexcept {
+    std::error_code ec2;
+    if (std::filesystem::file_size(log, ec2) == 0 || ec2.value() == ENOENT) {
+        ::close(fd);
+        fd = ::open(log.c_str(),
+                    O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
+        if (fd < 0) return -1;
+        if (::flock(fd, LOCK_EX) != 0) {
+            ::close(fd);
+            return -1;
+        }
+    }
+    return fd;
+}
+
+// EINTR-safe write of `data` to `fd`. Returns true if all bytes
+// landed, false on any non-EINTR write error.
+bool write_all(int fd, std::string_view data) noexcept {
+    auto remaining = data.size();
+    const char* p = data.data();
+    while (remaining > 0) {
+        ssize_t n = ::write(fd, p, remaining);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return false;
+        }
+        p += n;
+        remaining -= static_cast<std::size_t>(n);
+    }
+    return true;
+}
+
+}  // namespace
+
+// Append a single JSONL event. The locking protocol guarantees that
+// concurrent mtk processes do not interleave bytes inside a record:
+// each holds LOCK_EX across rotate-check + write(2) + close. Per
+// audit, the orchestration is split into three named helpers
+// (open_log_append, reopen_after_rotate, write_all) so the protocol
+// reads as a transcript.
 bool append(const Event& event) noexcept {
-    // Correctness critic C2+C7: PIPE_BUF atomicity only applies to pipes,
-    // not regular files. std::ofstream can split a single line across
-    // multiple write(2) calls and concurrent mtk processes can interleave
-    // bytes inside a JSON line. Fix: serialise to one buffer, then take a
-    // process-exclusive flock around: rotation-check + single write(2)
-    // + close. flock is held only for the syscall itself so contention
-    // stays in the microsecond range.
-    //
-    // Perf critic B4: cache "directory exists" per process — mkdir-p is
-    // the slowest step in the open path (stats every component). For a
-    // one-shot binary this caches across only one event, but a future
-    // long-lived caller (mtk repl?) benefits. Try-open-first, fall back
-    // to mkdir-p on ENOENT — saves the stat chain on every event.
     try {
         auto log = log_file();
-        static std::atomic<bool> dir_known_good{false};
 
         Event stamped = event;
         if (stamped.ts.empty()) stamped.ts = format_iso_utc_now();
         std::string line = serialise(stamped);
         line.push_back('\n');
 
-        int fd = ::open(log.c_str(),
-                        O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
-        if (fd < 0 && errno == ENOENT && !dir_known_good.load(std::memory_order_acquire)) {
-            // First time (or dir was removed). mkdir-p then retry.
-            std::error_code ec;
-            std::filesystem::create_directories(log.parent_path(), ec);
-            fd = ::open(log.c_str(),
-                        O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
-            if (fd >= 0) dir_known_good.store(true, std::memory_order_release);
-        } else if (fd >= 0) {
-            dir_known_good.store(true, std::memory_order_release);
-        }
+        int fd = open_log_append(log);
         if (fd < 0) return false;
 
-        // Block until we have the exclusive lock; only held across one
-        // rotate-check + one write. Per-event lock contention is bounded
-        // by the syscall cost (~tens of microseconds).
         if (::flock(fd, LOCK_EX) != 0) {
             ::close(fd);
             return false;
         }
 
-        // Rotate while holding the lock so cross-process moves are safe:
-        // process B's pending write either lands in the new (post-rotate)
-        // log, or it stalled in flock until our rotate finished.
+        // Rotation must happen under the lock so cross-process moves
+        // are safe: process B's pending write either lands in the new
+        // (post-rotate) log, or it stalled in flock until our rotate
+        // finished.
         rotate_if_needed(log);
-        // Re-open after rotate: the fd we have points at the now-renamed
-        // .1 file; subsequent writes would go there and be lost on next
-        // rotation. Drop our fd, open fresh.
-        if (std::error_code ec2; std::filesystem::file_size(log, ec2) == 0 ||
-                                 ec2.value() == ENOENT) {
-            ::close(fd);
-            fd = ::open(log.c_str(),
-                        O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
-            if (fd < 0) return false;
-            if (::flock(fd, LOCK_EX) != 0) {
-                ::close(fd);
-                return false;
-            }
-        }
+        fd = reopen_after_rotate(fd, log);
+        if (fd < 0) return false;
 
-        ssize_t to_write = static_cast<ssize_t>(line.size());
-        ssize_t written = 0;
-        while (written < to_write) {
-            ssize_t n = ::write(fd, line.data() + written,
-                                static_cast<std::size_t>(to_write - written));
-            if (n < 0) {
-                if (errno == EINTR) continue;
-                (void)::flock(fd, LOCK_UN);
-                ::close(fd);
-                return false;
-            }
-            written += n;
-        }
+        const bool ok = write_all(fd, line);
 
         (void)::flock(fd, LOCK_UN);
         ::close(fd);
-        return true;
+        return ok;
     } catch (...) {
         return false;
     }

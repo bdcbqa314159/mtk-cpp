@@ -3,6 +3,7 @@ add_executable(mtk_tests
     test_git_log.cpp
     test_git_status.cpp
     test_git_diff.cpp
+    test_git_show.cpp
     test_ls.cpp
     test_grep.cpp
     test_hook.cpp

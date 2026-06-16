@@ -177,7 +177,15 @@ using json = nlohmann::json;
 using internal::decide_rewrite;
 using internal::strip_bom;
 
-// --- VS Code Copilot Chat schema ---
+// Schema handlers: each returns `true` if it recognises the shape
+// (i.e. `v` is its format). If so, it may mutate `v` to apply a
+// rewrite; if the shape is recognised but no rewrite applies (wrong
+// tool, missing command field, etc.), it leaves `v` unchanged and
+// still returns true. Returns `false` only when the shape is not its
+// schema — letting the caller try the next handler. The handlers do
+// NOT emit; emission is a single point in run_copilot.
+
+// VS Code Copilot Chat:
 // {"tool_name": "Bash"|"runTerminalCommand", "tool_input": {"command": "..."}}
 bool try_handle_vscode(json& v) {
     auto tool_name_it = v.find("tool_name");
@@ -186,69 +194,45 @@ bool try_handle_vscode(json& v) {
     const auto tool_name = tool_name_it->get<std::string>();
     if (tool_name != "Bash" && tool_name != "bash" &&
         tool_name != "runTerminalCommand") {
-        // Recognised as VS Code shape but tool isn't a Bash variant — emit
-        // unchanged. Return true so the caller doesn't try the CLI shape.
-        std::cout << v.dump();
-        return true;
+        return true;  // VS Code shape, but not a Bash variant — leave `v` as-is.
     }
 
     auto& input = v["tool_input"];
-    if (!input.is_object()) {
-        std::cout << v.dump();
-        return true;
-    }
+    if (!input.is_object()) return true;
     auto cmd_it = input.find("command");
-    if (cmd_it == input.end() || !cmd_it->is_string()) {
-        std::cout << v.dump();
-        return true;
-    }
+    if (cmd_it == input.end() || !cmd_it->is_string()) return true;
 
-    auto rewritten = decide_rewrite(cmd_it->get<std::string>());
-    if (rewritten) input["command"] = *rewritten;
-    std::cout << v.dump();
+    if (auto rewritten = decide_rewrite(cmd_it->get<std::string>())) {
+        input["command"] = *rewritten;
+    }
     return true;
 }
 
-// --- Copilot CLI schema ---
+// Copilot CLI:
 // {"toolName": "bash", "toolArgs": "{\"command\": \"...\"}"}
 // Note: toolArgs is a JSON-encoded STRING, not a nested object.
 bool try_handle_copilot_cli(json& v) {
     auto tool_name_it = v.find("toolName");
     if (tool_name_it == v.end() || !tool_name_it->is_string()) return false;
-    if (tool_name_it->get<std::string>() != "bash") {
-        std::cout << v.dump();
-        return true;
-    }
+    if (tool_name_it->get<std::string>() != "bash") return true;
 
     auto args_it = v.find("toolArgs");
-    if (args_it == v.end() || !args_it->is_string()) {
-        std::cout << v.dump();
-        return true;
-    }
+    if (args_it == v.end() || !args_it->is_string()) return true;
 
     json args;
     try {
         args = json::parse(args_it->get<std::string>());
     } catch (const json::exception&) {
-        std::cout << v.dump();
-        return true;
+        return true;  // malformed inner JSON — pass through unchanged.
     }
-    if (!args.is_object()) {
-        std::cout << v.dump();
-        return true;
-    }
+    if (!args.is_object()) return true;
     auto cmd_it = args.find("command");
-    if (cmd_it == args.end() || !cmd_it->is_string()) {
-        std::cout << v.dump();
-        return true;
-    }
+    if (cmd_it == args.end() || !cmd_it->is_string()) return true;
 
-    auto rewritten = decide_rewrite(cmd_it->get<std::string>());
-    if (rewritten) {
+    if (auto rewritten = decide_rewrite(cmd_it->get<std::string>())) {
         args["command"] = *rewritten;
         v["toolArgs"] = args.dump();
     }
-    std::cout << v.dump();
     return true;
 }
 
@@ -299,10 +283,15 @@ int run_copilot() {
         return 0;
     }
 
-    if (try_handle_vscode(v)) return 0;
-    if (try_handle_copilot_cli(v)) return 0;
+    // Try each schema; the first that recognises the shape may have
+    // mutated `v` (rewriting the embedded bash command). Per audit:
+    // emission is a SINGLE point at the end of this function — the
+    // handlers no longer touch stdout themselves, so adding a new
+    // schema doesn't introduce another duplicated `std::cout` site.
+    (void)(try_handle_vscode(v) || try_handle_copilot_cli(v));
 
-    // Unknown shape — passthrough.
+    // Single emission point. Covers all paths: rewrite applied, shape
+    // recognised-but-no-rewrite, shape entirely unknown (`v` unchanged).
     std::cout << v.dump();
     return 0;
 }

@@ -261,13 +261,20 @@ CompactResult compact_ls(std::string_view raw, bool show_all, bool show_long) {
     r.parsed_count = b.parsed_count;
 
     if (b.dirs.empty() && b.files.empty()) {
-        // Empty if the directory was truly empty OR every line we saw
-        // was a dotdir (`.`, `..`). If we saw lines but parsed none AND
-        // not every unparsed line was a dotdir, we lost real content —
-        // bail without claiming "(empty)".
+        // Three "(empty)" cases (post-audit, restoring the all-noise
+        // branch that the Phase 4 decomposition dropped):
+        //   - truly empty: subprocess returned nothing.
+        //   - only-dotdirs: only `.` and `..` were present.
+        //   - all-noise: parsed real entries but every one was a noise
+        //     dir (`node_modules`, `.git`, etc.) filtered out when
+        //     show_all is false. User asked for ls, got nothing visible
+        //     — say "(empty)" rather than emitting blank stdout.
+        // If we saw lines but couldn't parse them AND they weren't
+        // dotdirs/noise, we lost real content — bail without claiming.
         const bool truly_empty = b.lines_seen == 0;
         const bool only_dotdirs = b.parsed_count == 0 && b.dotdirs == b.lines_seen;
-        if (truly_empty || only_dotdirs) r.entries = "(empty)\n";
+        const bool all_noise = b.parsed_count > 0;
+        if (truly_empty || only_dotdirs || all_noise) r.entries = "(empty)\n";
         return r;
     }
 

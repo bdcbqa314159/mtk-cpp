@@ -1,5 +1,6 @@
 #include "core/filter_cache.hpp"
 
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

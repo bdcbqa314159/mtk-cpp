@@ -1,12 +1,16 @@
 #include "core/run_context.hpp"
 
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <iostream>
+#include <string_view>
 #include <variant>
 
 #include "core/audit.hpp"
 #include "core/diagnostic.hpp"
 #include "core/exit_codes.hpp"
+#include "core/filter.hpp"
 #include "core/tee.hpp"
 
 namespace mtk::core {
@@ -130,6 +134,65 @@ std::size_t RunContext::cumulative_bytes_in() const noexcept {
 
 bool RunContext::any_capture_truncated() const noexcept {
     return any_truncated_;
+}
+
+int RunContext::run_and_audit(Filter& filter,
+                              DispatchTokenPtr token,
+                              const std::vector<std::string>& argv,
+                              std::string_view filter_name,
+                              std::string_view filter_source) noexcept {
+    auto start = std::chrono::steady_clock::now();
+
+    ex::ExecOutcome outcome;
+    try {
+        outcome = filter.run(std::move(token), argv, *this);
+    } catch (const std::exception& e) {
+        outcome = ex::SpawnFailed{e.what()};
+    } catch (...) {
+        outcome = ex::SpawnFailed{"unknown exception from filter run"};
+    }
+
+    // Snapshot the outcome fields the audit event needs BEFORE emit
+    // consumes the outcome.
+    std::size_t bytes_out = 0;
+    bool timed_out = false;
+    int killed_by_signal = 0;
+    bool bytes_in_capped = false;
+    if (auto* ran = std::get_if<ex::Ran>(&outcome)) {
+        bytes_out = ran->stdout_data.size() + ran->stderr_data.size();
+        timed_out = ran->timed_out;
+        killed_by_signal = ran->killed_by_signal;
+        bytes_in_capped = ran->truncated;
+    }
+
+    // Optional payload capture under MTK_AUDIT_PAYLOAD=1. We need the
+    // event_id stamped here so the audit event below references the
+    // same one. (audit::append generates fresh ids if event.event_id
+    // is empty; we explicitly thread ours through.)
+    auto event_id = mtk::core::audit::make_event_id();
+    if (auto* ran = std::get_if<ex::Ran>(&outcome)) {
+        (void)mtk::core::audit::capture_payload(event_id, ran->stdout_data);
+    }
+
+    int exit_code = emit(std::move(outcome), filter_name);
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start).count();
+
+    (void)audit(AuditEvent{
+        event_id,
+        std::string(filter_name),
+        std::string(filter_source),
+        argv,
+        exit_code,
+        /*bytes_in*/ 0,  // 0 = take from cumulative_bytes_in()
+        bytes_out,
+        static_cast<long>(elapsed),
+        bytes_in_capped,
+        timed_out,
+        killed_by_signal,
+    });
+
+    return exit_code;
 }
 
 }  // namespace mtk::core

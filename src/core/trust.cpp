@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <unistd.h>
 
 #include "core/config.hpp"
 
@@ -36,16 +37,23 @@ std::vector<std::filesystem::path> read_file_unfiltered(const std::filesystem::p
 // (or torn) if mtk was killed mid-write, or if a concurrent reader hit
 // the file between the truncate and the trailing writes. rename(2) on
 // the same filesystem is atomic per POSIX, so a reader either sees the
-// old file or the new file in full — never partial. Concurrent
-// `mtk trust` writers can still race (lost-update), but that's a
-// separate concern (rare for an interactive command).
+// old file or the new file in full — never partial.
+//
+// Per audit (post-Phase-4): the tmp path is per-process via getpid() so
+// two concurrent `mtk trust` invocations don't share a tmp file. The
+// previous fixed `.mtk-tmp` suffix caused a *confused-success* race —
+// A's tmp was wiped by B's `trunc` open, A's rename committed B's data,
+// and A reported "added /A" while the file held /B. Per-PID tmps make
+// the local-process write atomic; cross-process lost-update remains
+// possible (the read-modify-write isn't locked) but is now a true
+// last-writer-wins, not a lying-success.
 bool write_file(const std::filesystem::path& path,
                 const std::vector<std::filesystem::path>& entries) {
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
 
     auto tmp = path;
-    tmp += ".mtk-tmp";
+    tmp += ".mtk-tmp." + std::to_string(static_cast<long>(::getpid()));
 
     {
         std::ofstream f(tmp, std::ios::trunc);

@@ -101,3 +101,23 @@ TEST_CASE("compact_ls empty-input emits (empty)") {
     CHECK(r.entries == "(empty)\n");
     CHECK(r.summary.empty());
 }
+
+// Audit regression test: a directory containing only noise dirs (node_modules
+// etc.) used to show "(empty)\n" then silently dropped to empty stdout after
+// the Phase 4 compact_ls decomposition. This locks the all-noise case in.
+TEST_CASE("compact_ls all-noise directory emits (empty)") {
+    using mtk::cmds::ls::internal::compact_ls;
+    std::string raw =
+        "total 16\n"
+        "drwxr-xr-x  10 user group 320 Jan  1 12:00 node_modules\n"
+        "drwxr-xr-x   5 user group 160 Jan  1 12:00 .git\n"
+        "drwxr-xr-x   3 user group  96 Jan  1 12:00 __pycache__\n";
+    auto r = compact_ls(raw, /*show_all=*/false, /*show_long=*/false);
+    CHECK(r.entries == "(empty)\n");
+    CHECK(r.summary.empty());
+
+    // With show_all=true, the same dirs surface.
+    auto r2 = compact_ls(raw, /*show_all=*/true, /*show_long=*/false);
+    CHECK(r2.entries.find("node_modules/") != std::string::npos);
+    CHECK(r2.entries.find(".git/") != std::string::npos);
+}
