@@ -220,19 +220,26 @@ Buckets bucket_lines(std::string_view raw, bool show_all, bool show_long) {
 std::string format_entries(const Buckets& b) {
     std::ostringstream entries;
     for (const auto& d : b.dirs) {
-        if (d.octal) entries << *d.octal << "  ";
-        entries << d.name << "/\n";
+        // octal perms (long-mode) dim. Directory names + trailing /
+        // in blue — classic Unix `ls` convention.
+        if (d.octal) entries << mtk::core::color::dim(*d.octal) << "  ";
+        entries << mtk::core::color::blue(d.name + "/") << '\n';
     }
     for (const auto& f : b.files) {
-        if (f.octal) entries << *f.octal << "  ";
-        entries << f.name << "  " << f.size << '\n';
+        // File names plain (their colors would conflict with extension
+        // semantics that vary too much); size in dim so the name reads
+        // first.
+        if (f.octal) entries << mtk::core::color::dim(*f.octal) << "  ";
+        entries << f.name << "  " << mtk::core::color::dim(f.size) << '\n';
     }
     return entries.str();
 }
 
 std::string format_summary(const Buckets& b) {
+    // Build the summary as a single string and dim it as a unit — the
+    // line is meta-information about the listing, not part of it.
     std::ostringstream summary;
-    summary << "\nSummary: " << b.files.size() << " files, " << b.dirs.size() << " dirs";
+    summary << "Summary: " << b.files.size() << " files, " << b.dirs.size() << " dirs";
     if (!b.by_ext.empty()) {
         std::vector<std::pair<std::string, std::size_t>> ext_counts(
             b.by_ext.begin(), b.by_ext.end());
@@ -249,8 +256,7 @@ std::string format_summary(const Buckets& b) {
         }
         summary << ')';
     }
-    summary << '\n';
-    return summary.str();
+    return "\n" + mtk::core::color::dim(summary.str()) + "\n";
 }
 
 }  // namespace
