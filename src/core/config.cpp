@@ -30,13 +30,24 @@ load_from_dir(const std::filesystem::path& dir) {
     std::vector<mtk::core::toml_filter::Filter> out;
     std::error_code ec;
     if (!std::filesystem::is_directory(dir, ec)) return out;
-    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
-        if (!entry.is_regular_file()) continue;
-        if (entry.path().extension() != ".toml") continue;
-        auto src = read_file(entry.path());
-        if (src.empty()) continue;
-        auto parsed = mtk::core::toml_filter::parse_all(src);
-        for (auto& f : parsed) out.push_back(std::move(f));
+    // Per correctness critic C-RoundE-6: the `ec` arg to directory_iterator
+    // only suppresses *construction* failures; range-for's operator++ still
+    // throws on mid-iteration errors (broken symlink, permissions stripped
+    // between stat calls). That exception escaped dispatch() and killed
+    // mtk. Wrap in try/catch + per-entry ec-overload of is_regular_file.
+    try {
+        for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+            std::error_code entry_ec;
+            if (!entry.is_regular_file(entry_ec) || entry_ec) continue;
+            if (entry.path().extension() != ".toml") continue;
+            auto src = read_file(entry.path());
+            if (src.empty()) continue;
+            auto parsed = mtk::core::toml_filter::parse_all(src);
+            for (auto& f : parsed) out.push_back(std::move(f));
+        }
+    } catch (const std::filesystem::filesystem_error&) {
+        // Best-effort: return whatever we collected before the iteration
+        // error. Caller treats this no differently from a missing dir.
     }
     return out;
 }
@@ -106,10 +117,16 @@ std::vector<std::filesystem::path> list_toml_paths(const std::filesystem::path& 
     std::vector<std::filesystem::path> out;
     std::error_code ec;
     if (!std::filesystem::is_directory(dir, ec)) return out;
-    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
-        if (!entry.is_regular_file()) continue;
-        if (entry.path().extension() != ".toml") continue;
-        out.push_back(entry.path());
+    // Same throw-on-iteration concern as load_from_dir — see comment there.
+    try {
+        for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+            std::error_code entry_ec;
+            if (!entry.is_regular_file(entry_ec) || entry_ec) continue;
+            if (entry.path().extension() != ".toml") continue;
+            out.push_back(entry.path());
+        }
+    } catch (const std::filesystem::filesystem_error&) {
+        // Best-effort.
     }
     std::sort(out.begin(), out.end());  // stable order for cache manifest
     return out;

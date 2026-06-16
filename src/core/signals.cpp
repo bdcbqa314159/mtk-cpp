@@ -67,14 +67,21 @@ void install() noexcept {
 }
 
 int take() noexcept {
-    // exchange returns the OLD value and atomically resets to 0 — closes
-    // the lost-signal-between-load-and-clear race that the previous
-    // pending()/clear() pair had.
-    int mask = g_mask.exchange(0, std::memory_order_acq_rel);
-    if (mask & (1 << SIGINT))  return SIGINT;
-    if (mask & (1 << SIGTERM)) return SIGTERM;
-    if (mask & (1 << SIGHUP))  return SIGHUP;
-    return 0;
+    // Take ONE signal (highest priority), clear only that bit. The
+    // previous exchange(0) drained all bits but the if-chain returned
+    // only one signal — a second pending signal was silently dropped
+    // (SIGINT+SIGHUP racing → SIGHUP-as-log-rotate was lost). fetch_and
+    // is atomic and lock-free; a signal arriving between the load and
+    // the clear is OR'd into the mask by the handler and survives.
+    int mask = g_mask.load(std::memory_order_acquire);
+    int bit = 0;
+    int sig = 0;
+    if      (mask & (1 << SIGINT))  { bit = 1 << SIGINT;  sig = SIGINT; }
+    else if (mask & (1 << SIGTERM)) { bit = 1 << SIGTERM; sig = SIGTERM; }
+    else if (mask & (1 << SIGHUP))  { bit = 1 << SIGHUP;  sig = SIGHUP; }
+    else return 0;
+    g_mask.fetch_and(~bit, std::memory_order_acq_rel);
+    return sig;
 }
 
 bool any_pending() noexcept {

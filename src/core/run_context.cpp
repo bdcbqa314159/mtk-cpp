@@ -109,10 +109,13 @@ int RunContext::report_spawn_failure(const ex::ExecOutcome& outcome,
 }
 
 std::string RunContext::audit(AuditEvent event) noexcept {
+    // Single source of truth: audit() owns id generation. Previously
+    // run_and_audit pre-generated one and threaded it through an
+    // event_id field; the dual path masked a real footgun (audit's
+    // payload and audit's JSONL line under different ids if any caller
+    // ever forgot to pre-populate).
     mtk::core::audit::Event e;
-    e.event_id = event.event_id.empty()
-        ? mtk::core::audit::make_event_id()
-        : std::move(event.event_id);
+    e.event_id         = mtk::core::audit::make_event_id();
     e.argv             = std::move(event.argv);
     e.filter_name      = std::move(event.filter_name);
     e.filter_source    = std::move(event.filter_source);
@@ -120,7 +123,6 @@ std::string RunContext::audit(AuditEvent event) noexcept {
     e.bytes_in         = event.bytes_in != 0 ? event.bytes_in : cumulative_in_bytes_;
     e.bytes_out        = event.bytes_out;
     e.elapsed_ms       = event.elapsed_ms;
-    // OR in the sticky flag — a true value from either source wins.
     e.bytes_in_capped  = event.bytes_in_capped || any_truncated_;
     e.timed_out        = event.timed_out;
     e.killed_by_signal = event.killed_by_signal;
@@ -153,33 +155,28 @@ int RunContext::run_and_audit(Filter& filter,
     }
 
     // Snapshot the outcome fields the audit event needs BEFORE emit
-    // consumes the outcome.
+    // consumes the outcome. The stdout copy is only taken when
+    // MTK_AUDIT_PAYLOAD=1 (default off) — common path skips it.
     std::size_t bytes_out = 0;
     bool timed_out = false;
     int killed_by_signal = 0;
     bool bytes_in_capped = false;
+    std::string payload_snapshot;
+    const char* payload_env = std::getenv("MTK_AUDIT_PAYLOAD");
+    const bool want_payload = payload_env && std::string_view(payload_env) == "1";
     if (auto* ran = std::get_if<ex::Ran>(&outcome)) {
         bytes_out = ran->stdout_data.size() + ran->stderr_data.size();
         timed_out = ran->timed_out;
         killed_by_signal = ran->killed_by_signal;
         bytes_in_capped = ran->truncated;
-    }
-
-    // Optional payload capture under MTK_AUDIT_PAYLOAD=1. We need the
-    // event_id stamped here so the audit event below references the
-    // same one. (audit::append generates fresh ids if event.event_id
-    // is empty; we explicitly thread ours through.)
-    auto event_id = mtk::core::audit::make_event_id();
-    if (auto* ran = std::get_if<ex::Ran>(&outcome)) {
-        (void)mtk::core::audit::capture_payload(event_id, ran->stdout_data);
+        if (want_payload) payload_snapshot = ran->stdout_data;
     }
 
     int exit_code = emit(std::move(outcome), filter_name);
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start).count();
 
-    (void)audit(AuditEvent{
-        event_id,
+    auto event_id = audit(AuditEvent{
         std::string(filter_name),
         std::string(filter_source),
         argv,
@@ -191,6 +188,9 @@ int RunContext::run_and_audit(Filter& filter,
         timed_out,
         killed_by_signal,
     });
+    if (want_payload) {
+        (void)mtk::core::audit::capture_payload(event_id, payload_snapshot);
+    }
 
     return exit_code;
 }

@@ -12,6 +12,7 @@
 #include <random>
 #include <sstream>
 #include <sys/file.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace mtk::core::audit {
@@ -204,21 +205,36 @@ int open_log_append(const std::filesystem::path& log) noexcept {
     return fd;
 }
 
-// After rotate_if_needed moved the log aside, our fd points at the
+// After rotate_if_needed moved the log aside, our fd may point at the
 // renamed .1 file. Drop it and reopen the canonical path. Returns the
 // new fd (with LOCK_EX re-acquired) or -1 on failure. Caller must
 // release the lock on the returned fd.
+//
+// Per correctness critic C-RoundE-2: compare inodes (fstat vs stat) —
+// the previous file_size==0 || ENOENT check only caught the case where
+// *we* did the rotation. A different process that rotated between our
+// open() and our flock() acquisition leaves the canonical log non-empty
+// with our fd still pointing at .1; the loser then writes events into
+// the rotated file where they're invisible to readers.
 int reopen_after_rotate(int fd, const std::filesystem::path& log) noexcept {
-    std::error_code ec2;
-    if (std::filesystem::file_size(log, ec2) == 0 || ec2.value() == ENOENT) {
+    struct ::stat fd_st{};
+    struct ::stat path_st{};
+    const bool fd_ok = ::fstat(fd, &fd_st) == 0;
+    const bool path_ok = ::stat(log.c_str(), &path_st) == 0;
+    // If path is missing, recreate it. If fd and path point to the same
+    // inode, we're fine. Anything else (different inodes, fstat fail) →
+    // reopen.
+    if (fd_ok && path_ok && fd_st.st_ino == path_st.st_ino &&
+        fd_st.st_dev == path_st.st_dev) {
+        return fd;
+    }
+    ::close(fd);
+    fd = ::open(log.c_str(),
+                O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
+    if (fd < 0) return -1;
+    if (::flock(fd, LOCK_EX) != 0) {
         ::close(fd);
-        fd = ::open(log.c_str(),
-                    O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
-        if (fd < 0) return -1;
-        if (::flock(fd, LOCK_EX) != 0) {
-            ::close(fd);
-            return -1;
-        }
+        return -1;
     }
     return fd;
 }

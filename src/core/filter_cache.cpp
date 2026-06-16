@@ -6,7 +6,6 @@
 #include <cstring>
 #include <fcntl.h>
 #include <fstream>
-#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -285,25 +284,43 @@ void save(const SourceManifest& manifest,
         write_filter_list(w, user_filters);
         write_filter_list(w, project_filters);
 
+        // Per correctness critic C-RoundE-1: write to per-PID tmp then
+        // rename(2). The previous O_TRUNC + streaming write left a window
+        // where a crash mid-write produced an intact magic+version+manifest
+        // but a truncated filter payload; load() then silently dropped
+        // every TOML filter until `mtk reload` was run. Same pattern as
+        // trust.cpp:50.
         auto path = cache_file();
-        int fd = ::open(path.c_str(),
+        auto tmp = path;
+        tmp += ".tmp." + std::to_string(static_cast<long>(::getpid()));
+
+        int fd = ::open(tmp.c_str(),
                         O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
         if (fd < 0) return;
-        if (::flock(fd, LOCK_EX) != 0) { ::close(fd); return; }
 
         ssize_t remaining = static_cast<ssize_t>(w.buf.size());
         const char* p = w.buf.data();
+        bool write_ok = true;
         while (remaining > 0) {
             ssize_t n = ::write(fd, p, static_cast<std::size_t>(remaining));
             if (n < 0) {
                 if (errno == EINTR) continue;
+                write_ok = false;
                 break;
             }
             p += n;
             remaining -= n;
         }
-        (void)::flock(fd, LOCK_UN);
         ::close(fd);
+
+        if (!write_ok) {
+            std::filesystem::remove(tmp, ec);  // best-effort cleanup
+            return;
+        }
+        std::filesystem::rename(tmp, path, ec);
+        if (ec) {
+            std::filesystem::remove(tmp, ec);  // best-effort cleanup
+        }
     } catch (...) {
     }
 }

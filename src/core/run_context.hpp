@@ -72,7 +72,6 @@ public:
     // --- audit (Phase 3: writes JSONL events to ~/.local/state/mtk/events.jsonl) ---
 
     struct AuditEvent {
-        std::string event_id;            // optional; audit() generates if empty
         std::string filter_name;
         std::string filter_source;
         std::vector<std::string> argv;
@@ -87,8 +86,9 @@ public:
 
     // Appends the event to ~/.local/state/mtk/events.jsonl. If `bytes_in`
     // is left 0, fills it in from the cumulative capture() byte count
-    // tracked by this RunContext. Returns the resolved event_id (caller
-    // can use it for payload capture).
+    // tracked by this RunContext. Returns the generated event_id — sole
+    // source of truth (callers use it for payload capture rather than
+    // pre-generating their own).
     std::string audit(AuditEvent event) noexcept;
 
     // Cumulative bytes captured across all capture() calls on this

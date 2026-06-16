@@ -206,7 +206,12 @@ std::vector<std::string> build_rg_argv(const CliParse& cli) {
 }
 
 std::vector<std::string> build_grep_argv(const CliParse& cli) {
-    std::vector<std::string> argv = {"grep", "-rnH", cli.pattern, cli.path};
+    // -Z forces NUL-separated `file\0line:content` output. Without it,
+    // grep emits `file:line:content` and filenames containing `:digits:`
+    // (Windows drive letters, oddly-named files) make parse_match_line's
+    // colon scan attribute matches to the wrong file. GNU and BSD greps
+    // both honour -Z.
+    std::vector<std::string> argv = {"grep", "-rnHZ", cli.pattern, cli.path};
     for (const auto& e : cli.extras) argv.push_back(e);
     return argv;
 }
