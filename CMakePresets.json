@@ -8,15 +8,17 @@
       "description": "Optimised build, dynamic-linked libstdc++/libgcc.",
       "generator": "Unix Makefiles",
       "binaryDir": "${sourceDir}/build",
+      "condition": {"type": "notEquals", "lhs": "${hostSystemName}", "rhs": "Windows"},
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_INSTALL_PREFIX": "$env{HOME}/.local"
       }
     },
     {
       "name": "release-static",
       "inherits": "release",
       "displayName": "Release (static-linked stdc++/gcc)",
-      "description": "Binary that runs on older glibc — for cross-distro distribution. A Linux binary built here on Ubuntu 22 should run on RHEL 7.",
+      "description": "Binary that runs on older glibc -- for cross-distro distribution.",
       "binaryDir": "${sourceDir}/build-static",
       "cacheVariables": {
         "CMAKE_EXE_LINKER_FLAGS": "-static-libstdc++ -static-libgcc"
@@ -26,7 +28,7 @@
       "name": "release-debug-symbols",
       "inherits": "release",
       "displayName": "Release with debug symbols (RelWithDebInfo)",
-      "description": "Optimised but keeps debug info — useful for crash investigation on deployed binaries.",
+      "description": "Optimised but keeps debug info -- useful for crash investigation.",
       "binaryDir": "${sourceDir}/build-relwithdebinfo",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo"
@@ -41,18 +43,64 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug"
       }
+    },
+    {
+      "name": "windows-release",
+      "displayName": "Windows Release (x64)",
+      "description": "MSVC Release build. Works with VS 2022 (v17) and VS 2026 (v18).",
+      "binaryDir": "${sourceDir}/build",
+      "architecture": {"value": "x64", "strategy": "set"},
+      "condition": {"type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows"},
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "$env{USERPROFILE}/.local"
+      }
+    },
+    {
+      "name": "windows-debug",
+      "inherits": "windows-release",
+      "displayName": "Windows Debug (x64)",
+      "description": "MSVC Debug build.",
+      "binaryDir": "${sourceDir}/build-debug"
     }
   ],
   "buildPresets": [
-    {"name": "release", "configurePreset": "release"},
-    {"name": "release-static", "configurePreset": "release-static"},
-    {"name": "release-debug-symbols", "configurePreset": "release-debug-symbols"},
-    {"name": "debug", "configurePreset": "debug"}
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "release-static",
+      "configurePreset": "release-static"
+    },
+    {
+      "name": "release-debug-symbols",
+      "configurePreset": "release-debug-symbols"
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "windows-release",
+      "configurePreset": "windows-release",
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-debug",
+      "configurePreset": "windows-release",
+      "configuration": "Debug"
+    }
   ],
   "testPresets": [
     {
       "name": "release",
       "configurePreset": "release",
+      "output": {"outputOnFailure": true}
+    },
+    {
+      "name": "windows-release",
+      "configurePreset": "windows-release",
+      "configuration": "Release",
       "output": {"outputOnFailure": true}
     }
   ]
