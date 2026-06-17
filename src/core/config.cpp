@@ -1,21 +1,16 @@
 #include "core/config.hpp"
 
 #include <algorithm>
-#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 
+#include "core/platform/paths.hpp"
 #include "core/trust.hpp"
 
 namespace mtk::core::config {
 
 namespace {
-
-std::filesystem::path home_dir() {
-    if (const char* h = std::getenv("HOME")) return std::filesystem::path(h);
-    return std::filesystem::path(".");
-}
 
 std::string read_file(const std::filesystem::path& path) {
     std::ifstream f(path);
@@ -55,10 +50,7 @@ load_from_dir(const std::filesystem::path& dir) {
 }  // namespace
 
 std::filesystem::path config_dir() {
-    if (const char* xdg = std::getenv("XDG_CONFIG_HOME")) {
-        return std::filesystem::path(xdg) / "mtk";
-    }
-    return home_dir() / ".config" / "mtk";
+    return mtk::core::platform::config_dir();
 }
 
 std::filesystem::path filters_dir() {
@@ -66,10 +58,7 @@ std::filesystem::path filters_dir() {
 }
 
 std::filesystem::path org_dir() {
-    if (const char* env = std::getenv("MTK_ORG_CONFIG")) {
-        return std::filesystem::path(env);
-    }
-    return std::filesystem::path("/etc/mtk");
+    return mtk::core::platform::org_dir();
 }
 
 std::filesystem::path org_filters_dir() {

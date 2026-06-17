@@ -1,3 +1,4 @@
+#include <ostream>            // full definition needed before doctest on MSVC
 #include <doctest/doctest.h>
 
 #include <string>

@@ -1,34 +1,26 @@
 #include "core/filter_cache.hpp"
 
-#include <cerrno>
+#include <chrono>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
-#include <fcntl.h>
 #include <fstream>
-#include <sys/stat.h>
-#include <unistd.h>
+
+#include "core/platform/paths.hpp"
+#include "core/platform/process_id.hpp"
 
 namespace mtk::core::filter_cache {
 
 namespace {
 
 // File format magic + version. Bump version when the on-disk layout
-// changes; old caches with wrong version are treated as invalid (rebuilt).
+// or semantics change; old caches with wrong version are treated as
+// invalid (rebuilt — single per-invocation parse, no migration).
+//   v2: added Filter.locked field (A7 layered config).
+//   v3: mtime/size sourced via std::filesystem (was POSIX ::stat). The
+//       binary layout is unchanged but the mtime epoch is now the
+//       implementation's file_time_type, not POSIX time_t.
 constexpr char kMagic[4] = {'M', 'T', 'K', 'F'};
-// v2: added Filter.locked field (A7 layered config). Older caches are
-// invalidated and rebuilt — single per-invocation parse, no migration.
-constexpr std::uint32_t kVersion = 2;
-
-std::filesystem::path cache_dir() {
-    if (const char* xdg = std::getenv("XDG_CACHE_HOME")) {
-        return std::filesystem::path(xdg) / "mtk";
-    }
-    if (const char* home = std::getenv("HOME")) {
-        return std::filesystem::path(home) / ".cache" / "mtk";
-    }
-    return std::filesystem::path(".cache") / "mtk";
-}
+constexpr std::uint32_t kVersion = 3;
 
 // --- Tiny binary reader/writer ---
 
@@ -183,7 +175,7 @@ bool check_manifest_against(const std::string& raw, const SourceManifest& curren
 }  // namespace
 
 std::filesystem::path cache_file() {
-    return cache_dir() / "filters.bin";
+    return mtk::core::platform::cache_dir() / "filters.bin";
 }
 
 SourceManifest make_manifest(const std::vector<std::filesystem::path>& paths) {
@@ -192,14 +184,14 @@ SourceManifest make_manifest(const std::vector<std::filesystem::path>& paths) {
     for (const auto& p : paths) {
         SourceManifest::Entry e;
         e.path = p.string();
-        struct stat st {};
-        if (::stat(p.c_str(), &st) == 0) {
-            e.mtime_seconds = static_cast<std::int64_t>(st.st_mtime);
-            e.size_bytes = static_cast<std::uint64_t>(st.st_size);
-        } else {
-            e.mtime_seconds = 0;
-            e.size_bytes = 0;
-        }
+        std::error_code ec;
+        auto sz = std::filesystem::file_size(p, ec);
+        e.size_bytes = ec ? 0 : static_cast<std::uint64_t>(sz);
+        auto wt = std::filesystem::last_write_time(p, ec);
+        e.mtime_seconds = ec ? 0
+            : static_cast<std::int64_t>(
+                std::chrono::duration_cast<std::chrono::seconds>(
+                    wt.time_since_epoch()).count());
         m.sources.push_back(std::move(e));
     }
     return m;
@@ -270,7 +262,7 @@ void save(const SourceManifest& manifest,
           const std::vector<toml_filter::Filter>& project_filters) noexcept {
     try {
         std::error_code ec;
-        std::filesystem::create_directories(cache_dir(), ec);
+        std::filesystem::create_directories(mtk::core::platform::cache_dir(), ec);
 
         Writer w;
         w.bytes(kMagic, 4);
@@ -290,28 +282,21 @@ void save(const SourceManifest& manifest,
         // but a truncated filter payload; load() then silently dropped
         // every TOML filter until `mtk reload` was run. Same pattern as
         // trust.cpp:50.
+        //
+        // Per windows-port: I/O switched from POSIX ::open/::write/::close
+        // to std::ofstream (cross-platform). Loses O_CLOEXEC but the file
+        // is closed before rename, so the FD-leak window is microseconds.
         auto path = cache_file();
         auto tmp = path;
-        tmp += ".tmp." + std::to_string(static_cast<long>(::getpid()));
+        tmp += ".tmp." + std::to_string(mtk::core::platform::current_pid());
 
-        int fd = ::open(tmp.c_str(),
-                        O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
-        if (fd < 0) return;
-
-        ssize_t remaining = static_cast<ssize_t>(w.buf.size());
-        const char* p = w.buf.data();
-        bool write_ok = true;
-        while (remaining > 0) {
-            ssize_t n = ::write(fd, p, static_cast<std::size_t>(remaining));
-            if (n < 0) {
-                if (errno == EINTR) continue;
-                write_ok = false;
-                break;
-            }
-            p += n;
-            remaining -= n;
-        }
-        ::close(fd);
+        bool write_ok = false;
+        {
+            std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+            if (!f) return;
+            f.write(w.buf.data(), static_cast<std::streamsize>(w.buf.size()));
+            write_ok = static_cast<bool>(f);
+        }  // dtor flushes + closes before rename
 
         if (!write_ok) {
             std::filesystem::remove(tmp, ec);  // best-effort cleanup

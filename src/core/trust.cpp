@@ -5,9 +5,9 @@
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <unistd.h>
 
 #include "core/config.hpp"
+#include "core/platform/process_id.hpp"
 
 namespace mtk::core::trust {
 
@@ -53,7 +53,7 @@ bool write_file(const std::filesystem::path& path,
     std::filesystem::create_directories(path.parent_path(), ec);
 
     auto tmp = path;
-    tmp += ".mtk-tmp." + std::to_string(static_cast<long>(::getpid()));
+    tmp += ".mtk-tmp." + std::to_string(mtk::core::platform::current_pid());
 
     {
         std::ofstream f(tmp, std::ios::trunc);

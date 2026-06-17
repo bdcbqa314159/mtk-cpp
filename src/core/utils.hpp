@@ -35,4 +35,10 @@ namespace mtk::core::utils {
 
 [[nodiscard]] std::size_t count_tokens(std::string_view input);
 
+// --- JSON helpers ---
+
+// Append the JSON-escaped form of `s` to `out` (no surrounding quotes).
+// Handles all control characters per RFC 8259.
+void json_escape_into(std::string& out, std::string_view s);
+
 }  // namespace mtk::core::utils

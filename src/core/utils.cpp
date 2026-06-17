@@ -66,12 +66,16 @@ std::vector<std::string> split_lines(std::string_view input) {
     std::size_t start = 0;
     for (std::size_t i = 0; i < input.size(); ++i) {
         if (input[i] == '\n') {
-            lines.emplace_back(input.substr(start, i - start));
+            auto end = i;
+            if (end > start && input[end - 1] == '\r') --end;  // strip \r\n
+            lines.emplace_back(input.substr(start, end - start));
             start = i + 1;
         }
     }
     if (start < input.size()) {
-        lines.emplace_back(input.substr(start));
+        auto len = input.size() - start;
+        if (len > 0 && input.back() == '\r') --len;
+        lines.emplace_back(input.substr(start, len));
     }
     return lines;
 }
@@ -81,12 +85,16 @@ std::vector<std::string_view> split_lines_view(std::string_view input) {
     std::size_t start = 0;
     for (std::size_t i = 0; i < input.size(); ++i) {
         if (input[i] == '\n') {
-            lines.emplace_back(input.substr(start, i - start));
+            auto end = i;
+            if (end > start && input[end - 1] == '\r') --end;  // strip \r\n
+            lines.emplace_back(input.substr(start, end - start));
             start = i + 1;
         }
     }
     if (start < input.size()) {
-        lines.emplace_back(input.substr(start));
+        auto len = input.size() - start;
+        if (len > 0 && input.back() == '\r') --len;
+        lines.emplace_back(input.substr(start, len));
     }
     return lines;
 }
@@ -113,6 +121,30 @@ std::size_t count_tokens(std::string_view input) {
         }
     }
     return n;
+}
+
+void json_escape_into(std::string& out, std::string_view s) {
+    out.reserve(out.size() + s.size() + 2);
+    for (char c : s) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\b': out += "\\b";  break;
+            case '\f': out += "\\f";  break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x",
+                                  static_cast<unsigned char>(c));
+                    out += buf;
+                } else {
+                    out += c;
+                }
+        }
+    }
 }
 
 }  // namespace mtk::core::utils

@@ -1,18 +1,22 @@
 #include "core/audit.hpp"
 
 #include <chrono>
-#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
-#include <fcntl.h>
 #include <fstream>
-#include <iomanip>
 #include <nlohmann/json.hpp>
-#include <sstream>
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <unistd.h>
+
+#if defined(_WIN32)
+#  include <io.h>
+#else
+#  include <unistd.h>  // for fileno
+#endif
+
+#include "core/platform/file_lock.hpp"
+#include "core/platform/paths.hpp"
+#include "core/platform/process_id.hpp"
+#include "core/utils.hpp"
 
 namespace mtk::core::audit {
 
@@ -21,16 +25,6 @@ namespace {
 // Per A6 defaults; could move to core/limits.hpp under namespace audit{} later.
 constexpr std::size_t kRotationBytes   = 10 * 1024 * 1024;   // 10 MiB
 constexpr std::size_t kPayloadMaxBytes = 1  * 1024 * 1024;   // 1 MiB
-
-std::filesystem::path state_dir() {
-    if (const char* xdg = std::getenv("XDG_STATE_HOME")) {
-        return std::filesystem::path(xdg) / "mtk";
-    }
-    if (const char* home = std::getenv("HOME")) {
-        return std::filesystem::path(home) / ".local" / "state" / "mtk";
-    }
-    return std::filesystem::path(".local") / "state" / "mtk";
-}
 
 std::string format_iso_utc_now() {
     using namespace std::chrono;
@@ -62,36 +56,13 @@ void rotate_if_needed(const std::filesystem::path& log) noexcept {
 // One reserved string + append loop. No DOM, no per-field allocation,
 // no locale. Reduces audit::append cost from ~20-50 us to ~3-5 us per
 // event. Read path (mtk stats/tail/why) still uses nlohmann.
-void json_escape_into(std::string& out, std::string_view s) {
-    out.reserve(out.size() + s.size() + 2);
-    for (char c : s) {
-        switch (c) {
-            case '"':  out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\b': out += "\\b";  break;
-            case '\f': out += "\\f";  break;
-            case '\n': out += "\\n";  break;
-            case '\r': out += "\\r";  break;
-            case '\t': out += "\\t";  break;
-            default:
-                if (static_cast<unsigned char>(c) < 0x20) {
-                    char buf[8];
-                    std::snprintf(buf, sizeof(buf), "\\u%04x",
-                                  static_cast<unsigned char>(c));
-                    out += buf;
-                } else {
-                    out += c;
-                }
-        }
-    }
-}
 
 void append_str_field(std::string& out, std::string_view key, std::string_view val,
                       bool& first) {
     if (!first) out += ',';
     first = false;
     out += '"'; out += key; out += "\":\"";
-    json_escape_into(out, val);
+    mtk::core::utils::json_escape_into(out, val);
     out += '"';
 }
 
@@ -120,7 +91,7 @@ void append_strarr_field(std::string& out, std::string_view key,
         if (!inner_first) out += ',';
         inner_first = false;
         out += '"';
-        json_escape_into(out, s);
+        mtk::core::utils::json_escape_into(out, s);
         out += '"';
     }
     out += ']';
@@ -177,82 +148,73 @@ std::optional<Event> deserialise(const std::string& line) {
 }  // namespace
 
 std::filesystem::path log_file() {
-    return state_dir() / "events.jsonl";
+    return mtk::core::platform::state_dir() / "events.jsonl";
 }
 
 std::filesystem::path payload_dir() {
-    return state_dir() / "payloads";
+    return mtk::core::platform::state_dir() / "payloads";
 }
 
 namespace {
 
+// Extract the platform-native file handle from a FILE* so we can pass it
+// to platform::lock_exclusive / same_file. Both POSIX `fileno` and the
+// Windows `_get_osfhandle(_fileno(...))` pair are documented "give me
+// the underlying OS handle"; the FILE* remains owner and free is via
+// fclose. The handle is invalidated when the FILE* is closed.
+mtk::core::platform::native_file_handle native_handle_of(std::FILE* f) noexcept {
+#if defined(_WIN32)
+    int fd = ::_fileno(f);
+    if (fd < 0) return mtk::core::platform::kInvalidFileHandle;
+    auto h = reinterpret_cast<HANDLE>(::_get_osfhandle(fd));
+    return (h == reinterpret_cast<HANDLE>(-1)) ? mtk::core::platform::kInvalidFileHandle : h;
+#else
+    return ::fileno(f);
+#endif
+}
+
 // Open the log for append, creating it (and the parent dir) if needed.
-// Returns -1 on failure. Caches "directory exists" via an atomic_flag
-// so the mkdir-p stat chain runs at most once per process (B4).
-int open_log_append(const std::filesystem::path& log) noexcept {
+// Returns nullptr on failure. Caches "directory exists" via an atomic
+// flag so the mkdir-p stat chain runs at most once per process (B4).
+std::FILE* open_log_append(const std::filesystem::path& log) noexcept {
     static std::atomic<bool> dir_known_good{false};
-    int fd = ::open(log.c_str(),
-                    O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
-    if (fd < 0 && errno == ENOENT &&
-        !dir_known_good.load(std::memory_order_acquire)) {
+    // "ab": binary + append. POSIX-mandated O_APPEND semantics (atomic
+    // append from concurrent writers); Windows MSVCRT honours the same
+    // contract.
+    std::FILE* f = std::fopen(log.string().c_str(), "ab");
+    if (!f && !dir_known_good.load(std::memory_order_acquire)) {
         std::error_code ec;
         std::filesystem::create_directories(log.parent_path(), ec);
-        fd = ::open(log.c_str(),
-                    O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
+        f = std::fopen(log.string().c_str(), "ab");
     }
-    if (fd >= 0) dir_known_good.store(true, std::memory_order_release);
-    return fd;
+    if (f) dir_known_good.store(true, std::memory_order_release);
+    return f;
 }
 
-// After rotate_if_needed moved the log aside, our fd may point at the
+// After rotate_if_needed moved the log aside, our FILE* may point at the
 // renamed .1 file. Drop it and reopen the canonical path. Returns the
-// new fd (with LOCK_EX re-acquired) or -1 on failure. Caller must
-// release the lock on the returned fd.
+// new FILE* (with the exclusive lock re-acquired) or nullptr on failure.
 //
-// Per correctness critic C-RoundE-2: compare inodes (fstat vs stat) —
-// the previous file_size==0 || ENOENT check only caught the case where
-// *we* did the rotation. A different process that rotated between our
-// open() and our flock() acquisition leaves the canonical log non-empty
-// with our fd still pointing at .1; the loser then writes events into
-// the rotated file where they're invisible to readers.
-int reopen_after_rotate(int fd, const std::filesystem::path& log) noexcept {
-    struct ::stat fd_st{};
-    struct ::stat path_st{};
-    const bool fd_ok = ::fstat(fd, &fd_st) == 0;
-    const bool path_ok = ::stat(log.c_str(), &path_st) == 0;
-    // If path is missing, recreate it. If fd and path point to the same
-    // inode, we're fine. Anything else (different inodes, fstat fail) →
-    // reopen.
-    if (fd_ok && path_ok && fd_st.st_ino == path_st.st_ino &&
-        fd_st.st_dev == path_st.st_dev) {
-        return fd;
+// Per correctness critic C-RoundE-2: identity-compare the open handle
+// against the on-disk path. `platform::same_file` handles the POSIX
+// inode / Windows file-index check uniformly.
+std::FILE* reopen_after_rotate(std::FILE* f, const std::filesystem::path& log) noexcept {
+    if (mtk::core::platform::same_file(native_handle_of(f), log)) return f;
+    std::fclose(f);
+    f = std::fopen(log.string().c_str(), "ab");
+    if (!f) return nullptr;
+    if (!mtk::core::platform::lock_exclusive(native_handle_of(f))) {
+        std::fclose(f);
+        return nullptr;
     }
-    ::close(fd);
-    fd = ::open(log.c_str(),
-                O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
-    if (fd < 0) return -1;
-    if (::flock(fd, LOCK_EX) != 0) {
-        ::close(fd);
-        return -1;
-    }
-    return fd;
+    return f;
 }
 
-// EINTR-safe write of `data` to `fd`. Returns true if all bytes
-// landed, false on any non-EINTR write error.
-bool write_all(int fd, std::string_view data) noexcept {
-    auto remaining = data.size();
-    const char* p = data.data();
-    while (remaining > 0) {
-        ssize_t n = ::write(fd, p, remaining);
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            return false;
-        }
-        p += n;
-        remaining -= static_cast<std::size_t>(n);
-    }
-    return true;
+// Write the full record. fwrite returns items written; modern libcs
+// (glibc, libc++, MSVCRT) retry internally on EINTR / partial writes,
+// so a single call is sufficient.
+bool write_all(std::FILE* f, std::string_view data) noexcept {
+    return std::fwrite(data.data(), 1, data.size(), f) == data.size();
 }
 
 }  // namespace
@@ -272,26 +234,30 @@ bool append(const Event& event) noexcept {
         std::string line = serialise(stamped);
         line.push_back('\n');
 
-        int fd = open_log_append(log);
-        if (fd < 0) return false;
+        std::FILE* f = open_log_append(log);
+        if (!f) return false;
 
-        if (::flock(fd, LOCK_EX) != 0) {
-            ::close(fd);
+        if (!mtk::core::platform::lock_exclusive(native_handle_of(f))) {
+            std::fclose(f);
             return false;
         }
 
         // Rotation must happen under the lock so cross-process moves
         // are safe: process B's pending write either lands in the new
-        // (post-rotate) log, or it stalled in flock until our rotate
-        // finished.
+        // (post-rotate) log, or it stalled on lock acquisition until
+        // our rotate finished.
         rotate_if_needed(log);
-        fd = reopen_after_rotate(fd, log);
-        if (fd < 0) return false;
+        f = reopen_after_rotate(f, log);
+        if (!f) return false;
 
-        const bool ok = write_all(fd, line);
+        const bool ok = write_all(f, line);
+        // Drain libc buffer to the kernel before releasing the lock —
+        // otherwise another process could acquire the lock and read
+        // a partially-written record.
+        std::fflush(f);
 
-        (void)::flock(fd, LOCK_UN);
-        ::close(fd);
+        mtk::core::platform::unlock(native_handle_of(f));
+        std::fclose(f);
         return ok;
     } catch (...) {
         return false;
@@ -326,7 +292,7 @@ std::string make_event_id() {
     static thread_local std::uint64_t state = []() noexcept -> std::uint64_t {
         const auto t = std::chrono::steady_clock::now().time_since_epoch().count();
         return static_cast<std::uint64_t>(t)
-             ^ (static_cast<std::uint64_t>(::getpid()) << 32)
+             ^ (static_cast<std::uint64_t>(mtk::core::platform::current_pid()) << 32)
              ^ 0x9E3779B97F4A7C15ULL;
     }();
     state += 0x9E3779B97F4A7C15ULL;

@@ -10,7 +10,18 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-add_compile_options(-Wall -Wextra -Wpedantic -Wshadow -Wno-unused-parameter)
+if(MSVC)
+    # /W4 = "all reasonable warnings"; /permissive- enforces standard C++
+    # (closer to GCC/Clang strictness). /Zc:__cplusplus makes __cplusplus
+    # report the actual standard rather than 199711L.
+    add_compile_options(/W4 /permissive- /Zc:__cplusplus)
+    # NOMINMAX prevents <windows.h> from defining min/max macros that
+    # collide with std::min/std::max; WIN32_LEAN_AND_MEAN trims the
+    # windows.h surface.
+    add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+else()
+    add_compile_options(-Wall -Wextra -Wpedantic -Wshadow -Wno-unused-parameter)
+endif()
 
 # ---------- version stamp (git SHA + build date → src/version.hpp) ----------
 find_package(Git QUIET)
@@ -154,6 +165,8 @@ set(MTK_CORE_SOURCES
     src/core/trust.cpp
     src/core/audit.cpp
     src/core/filter_cache.cpp
+    src/core/platform/paths.cpp
+    src/core/platform/file_lock.cpp
 )
 
 set(MTK_CMD_SOURCES
