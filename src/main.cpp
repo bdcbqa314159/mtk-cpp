@@ -18,7 +18,7 @@ namespace {
 
 void print_help() {
     std::cout
-        << "mtk — Minimal Token Killer (" << mtk::kVersion << ")\n"
+        << "mtk -- Minimal Token Killer (" << mtk::kVersion << ")\n"
         << "\n"
         << "Usage:\n"
         << "  mtk <command> [args...]         Run command through registry dispatch\n"
