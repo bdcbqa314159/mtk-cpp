@@ -16,6 +16,7 @@
 #include "core/platform/file_lock.hpp"
 #include "core/platform/paths.hpp"
 #include "core/platform/process_id.hpp"
+#include "core/utils.hpp"
 
 namespace mtk::core::audit {
 
@@ -55,36 +56,13 @@ void rotate_if_needed(const std::filesystem::path& log) noexcept {
 // One reserved string + append loop. No DOM, no per-field allocation,
 // no locale. Reduces audit::append cost from ~20-50 us to ~3-5 us per
 // event. Read path (mtk stats/tail/why) still uses nlohmann.
-void json_escape_into(std::string& out, std::string_view s) {
-    out.reserve(out.size() + s.size() + 2);
-    for (char c : s) {
-        switch (c) {
-            case '"':  out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\b': out += "\\b";  break;
-            case '\f': out += "\\f";  break;
-            case '\n': out += "\\n";  break;
-            case '\r': out += "\\r";  break;
-            case '\t': out += "\\t";  break;
-            default:
-                if (static_cast<unsigned char>(c) < 0x20) {
-                    char buf[8];
-                    std::snprintf(buf, sizeof(buf), "\\u%04x",
-                                  static_cast<unsigned char>(c));
-                    out += buf;
-                } else {
-                    out += c;
-                }
-        }
-    }
-}
 
 void append_str_field(std::string& out, std::string_view key, std::string_view val,
                       bool& first) {
     if (!first) out += ',';
     first = false;
     out += '"'; out += key; out += "\":\"";
-    json_escape_into(out, val);
+    mtk::core::utils::json_escape_into(out, val);
     out += '"';
 }
 
@@ -113,7 +91,7 @@ void append_strarr_field(std::string& out, std::string_view key,
         if (!inner_first) out += ',';
         inner_first = false;
         out += '"';
-        json_escape_into(out, s);
+        mtk::core::utils::json_escape_into(out, s);
         out += '"';
     }
     out += ']';
@@ -186,7 +164,10 @@ namespace {
 // fclose. The handle is invalidated when the FILE* is closed.
 mtk::core::platform::native_file_handle native_handle_of(std::FILE* f) noexcept {
 #if defined(_WIN32)
-    return reinterpret_cast<HANDLE>(::_get_osfhandle(::_fileno(f)));
+    int fd = ::_fileno(f);
+    if (fd < 0) return mtk::core::platform::kInvalidFileHandle;
+    auto h = reinterpret_cast<HANDLE>(::_get_osfhandle(fd));
+    return (h == reinterpret_cast<HANDLE>(-1)) ? mtk::core::platform::kInvalidFileHandle : h;
 #else
     return ::fileno(f);
 #endif

@@ -9,6 +9,7 @@
 
 #include "core/exe_path.hpp"
 #include "core/exit_codes.hpp"
+#include "core/utils.hpp"
 
 namespace mtk::cmds::init {
 
@@ -30,18 +31,10 @@ std::string shell_single_quote(const std::filesystem::path& p) {
     return out;
 }
 
-// Format a path for inclusion in a JSON string value (escapes \ and ").
+// Format a path for inclusion in a JSON string value.
 std::string json_escape(const std::filesystem::path& p) {
-    const auto s = p.string();
     std::string out;
-    out.reserve(s.size());
-    for (char c : s) {
-        switch (c) {
-            case '\\': out += "\\\\"; break;
-            case '"':  out += "\\\""; break;
-            default:   out += c; break;
-        }
-    }
+    mtk::core::utils::json_escape_into(out, p.string());
     return out;
 }
 
