@@ -186,7 +186,7 @@ int run_tail(const std::vector<std::string>& argv) {
         msg << "(no audit events — "
             << mtk::core::audit::log_file() << " is empty or absent)";
         std::cout << mtk::core::color::dim(msg.str()) << '\n';
-        
+
         return 0;
     }
     for (const auto& e : events) {
@@ -210,15 +210,12 @@ int run_tail(const std::vector<std::string>& argv) {
 int run_stats() {
     auto events = mtk::core::audit::read_all();
     if (events.empty()) {
-<<<<<<< HEAD
-        std::cout << "(no audit events -- "
-                  << mtk::core::audit::log_file() << " is empty or absent)\n";
-=======
+
         std::ostringstream msg;
         msg << "(no audit events — "
             << mtk::core::audit::log_file() << " is empty or absent)";
         std::cout << mtk::core::color::dim(msg.str()) << '\n';
->>>>>>> 1ba9d0d (phase 2 color: red on diag::emit (errors + spawn-fail), dim on tee hint / (empty) / 0 matches / (no audit events) / (no trusted paths), yellow on trust nag; also route exec::passthrough's command-not-found through diag::emit so it picks up the color policy)
+        
         return 0;
     }
 
