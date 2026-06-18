@@ -12,6 +12,7 @@
 #include "core/exit_codes.hpp"
 #include "core/filter.hpp"
 #include "core/tee.hpp"
+#include "core/utils.hpp"
 
 namespace mtk::core {
 
@@ -22,10 +23,28 @@ ex::ExecOutcome RunContext::capture(const std::vector<std::string>& argv,
     try {
         auto outcome = ex::capture_outcome(argv, env_extra);
         if (auto* ran = std::get_if<ex::Ran>(&outcome)) {
+            // bytes_in counts the RAW child output (pre-strip) so audit
+            // savings % reflects "what mtk reduced", which includes
+            // ANSI-stripping for color-emitting children.
             cumulative_in_bytes_ += ran->stdout_data.size() + ran->stderr_data.size();
             // Per C11: set sticky truncation flag so audit() picks it up
             // even when the caller discards this intermediate Ran.
             if (ran->truncated) any_truncated_ = true;
+
+            // Strip child ANSI escapes from captured output before
+            // filters see it. Two reasons:
+            //   1. Builtin compactors parse text by structure (line
+            //      prefixes, regex). Embedded escape codes break those
+            //      parsers when a child force-enables color (git
+            //      diff --color=always, rg, eza, etc.).
+            //   2. Agents (the default mtk consumer) get color-free
+            //      output regardless of what the child decided. mtk
+            //      adds its OWN color in the emit path when stdout is
+            //      a TTY — separate from passthrough of child colors.
+            // strip_ansi has a fast path (no ESC byte → no-op copy),
+            // so ANSI-free output costs essentially nothing.
+            ran->stdout_data = mtk::core::utils::strip_ansi(ran->stdout_data);
+            ran->stderr_data = mtk::core::utils::strip_ansi(ran->stderr_data);
         }
         return outcome;
     } catch (const std::exception& e) {

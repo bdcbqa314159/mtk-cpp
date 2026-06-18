@@ -5,6 +5,7 @@
 #include <sstream>
 #include <unordered_map>
 
+#include "core/color.hpp"
 #include "core/exec.hpp"
 #include "core/exit_codes.hpp"
 #include "core/filter.hpp"
@@ -260,7 +261,7 @@ public:
         }
         if (stdout_empty) {
             return mtk::core::exec::Ran{
-                "0 matches for '" + cli.pattern + "'\n",
+                mtk::core::color::dim("0 matches for '" + cli.pattern + "'") + "\n",
                 (ran->exit_code == 2) ? ran->stderr_data : std::string{},
                 ran->exit_code,
                 ran->truncated, ran->timed_out, ran->killed_by_signal,

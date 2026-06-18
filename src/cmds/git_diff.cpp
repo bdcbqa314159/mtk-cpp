@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "core/color.hpp"
 #include "core/exec.hpp"
 #include "core/filter.hpp"
 #include "core/run_context.hpp"
@@ -59,11 +60,13 @@ public:
         flush_hunk_truncation();
         flush_file_summary();
         if (hit_global_cap_) {
-            emit_line_prefixed("\n", "... (more changes truncated)");
+            emit_line_prefixed(
+                "\n", mtk::core::color::dim("... (more changes truncated)"));
             was_truncated_ = true;
         }
         if (was_truncated_) {
-            emit_line("[full diff: mtk git diff --no-compact]");
+            emit_line(mtk::core::color::dim(
+                "[full diff: mtk git diff --no-compact]"));
         }
         return std::move(out_);
     }
@@ -89,7 +92,9 @@ private:
         flush_hunk_truncation();
         flush_file_summary();
         current_file_ = extract_b_path(line);
-        emit_line_prefixed("\n", current_file_);  // leading \n = blank separator before each file
+        // File header in bold so each file's section stands out
+        // visually. leading \n = blank separator before each file.
+        emit_line_prefixed("\n", mtk::core::color::bold(current_file_));
         added_ = 0;
         removed_ = 0;
         in_hunk_ = false;
@@ -100,31 +105,33 @@ private:
         flush_hunk_truncation();
         in_hunk_ = true;
         hunk_shown_ = 0;
-        emit_line_prefixed("  ", line);
+        // Hunk header in cyan (matches native `git diff` convention).
+        emit_line_prefixed("  ", mtk::core::color::cyan(std::string(line)));
     }
 
     void on_hunk_body_line(std::string_view line) {
         if (starts_with(line, "+") && !starts_with(line, "+++")) {
             ++added_;
-            emit_or_skip(line);
+            emit_or_skip(mtk::core::color::green(std::string(line)));
         } else if (starts_with(line, "-") && !starts_with(line, "---")) {
             ++removed_;
-            emit_or_skip(line);
+            emit_or_skip(mtk::core::color::red(std::string(line)));
         } else if (hunk_shown_ < max_hunk_lines_ &&
                    !starts_with(line, "\\")) {
             // Context lines are only shown once we've emitted at least
             // one +/- line in this hunk — `hunk_shown_ > 0` is the
-            // "we're inside meaningful content" gate.
+            // "we're inside meaningful content" gate. Context dim so
+            // it stays out of the way visually.
             if (hunk_shown_ > 0) {
-                emit_line_prefixed("  ", line);
+                emit_line_prefixed("  ", mtk::core::color::dim(std::string(line)));
                 ++hunk_shown_;
             }
         }
     }
 
-    void emit_or_skip(std::string_view line) {
+    void emit_or_skip(const std::string& content) {
         if (hunk_shown_ < max_hunk_lines_) {
-            emit_line_prefixed("  ", line);
+            emit_line_prefixed("  ", content);
             ++hunk_shown_;
         } else {
             ++hunk_skipped_;
@@ -133,10 +140,11 @@ private:
 
     void flush_hunk_truncation() {
         if (hunk_skipped_ > 0) {
+            std::string body = "  ... (";
+            body += std::to_string(hunk_skipped_);
+            body += " lines truncated)";
             if (lines_emitted_ > 0) out_ += '\n';
-            out_ += "  ... (";
-            out_ += std::to_string(hunk_skipped_);
-            out_ += " lines truncated)";
+            out_ += mtk::core::color::dim(body);
             ++lines_emitted_;
             was_truncated_ = true;
             hunk_skipped_ = 0;
@@ -145,11 +153,12 @@ private:
 
     void flush_file_summary() {
         if (!current_file_.empty() && (added_ > 0 || removed_ > 0)) {
+            std::string body = "  +";
+            body += std::to_string(added_);
+            body += " -";
+            body += std::to_string(removed_);
             if (lines_emitted_ > 0) out_ += '\n';
-            out_ += "  +";
-            out_ += std::to_string(added_);
-            out_ += " -";
-            out_ += std::to_string(removed_);
+            out_ += mtk::core::color::dim(body);
             ++lines_emitted_;
         }
     }

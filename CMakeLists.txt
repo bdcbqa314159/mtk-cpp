@@ -167,6 +167,8 @@ set(MTK_CORE_SOURCES
     src/core/filter_cache.cpp
     src/core/platform/paths.cpp
     src/core/platform/file_lock.cpp
+    src/core/color.cpp
+    src/core/platform/tty.cpp
 )
 
 set(MTK_CMD_SOURCES
