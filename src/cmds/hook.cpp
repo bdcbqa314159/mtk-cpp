@@ -259,7 +259,7 @@ int run_copilot() {
     }
     if (raw.size() >= kMaxStdinBytes) {
         std::cerr << "[mtk hook copilot] input exceeded " << kMaxStdinBytes
-                  << " bytes — passing through unchanged\n";
+                  << " bytes -- passing through unchanged\n";
         std::cout << raw;
         return 0;
     }

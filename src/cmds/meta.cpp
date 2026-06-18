@@ -71,7 +71,7 @@ int run_explain(const std::vector<std::string>& argv) {
             std::cout << "  filter:  " << match.filter->name() << '\n'
                       << "  source:  " << match.filter->source() << '\n';
         } else {
-            std::cout << "  (no filter matched — registry misconfigured)\n";
+            std::cout << "  (no filter matched -- registry misconfigured)\n";
         }
         std::cout << '\n';
     }
@@ -177,7 +177,7 @@ int run_tail(const std::vector<std::string>& argv) {
     }
     auto events = mtk::core::audit::tail(n);
     if (events.empty()) {
-        std::cout << "(no audit events — "
+        std::cout << "(no audit events -- "
                   << mtk::core::audit::log_file() << " is empty or absent)\n";
         return 0;
     }
@@ -202,7 +202,7 @@ int run_tail(const std::vector<std::string>& argv) {
 int run_stats() {
     auto events = mtk::core::audit::read_all();
     if (events.empty()) {
-        std::cout << "(no audit events — "
+        std::cout << "(no audit events -- "
                   << mtk::core::audit::log_file() << " is empty or absent)\n";
         return 0;
     }
@@ -235,7 +235,7 @@ int run_stats() {
         return in > 0 ? 100 - static_cast<long>(out * 100 / in) : 0;
     };
 
-    std::cout << "mtk stats — " << events.size() << " events in "
+    std::cout << "mtk stats -- " << events.size() << " events in "
               << mtk::core::audit::log_file() << "\n\n";
     std::cout << "Overall:\n"
               << "  bytes_in:   " << fmt_bytes(overall.bytes_in) << "\n"

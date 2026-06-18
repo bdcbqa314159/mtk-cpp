@@ -58,7 +58,7 @@ bool write_file(const std::filesystem::path& path,
     {
         std::ofstream f(tmp, std::ios::trunc);
         if (!f) return false;
-        f << "# mtk allow-list — canonical paths whose .mtk/filters/ may load.\n"
+        f << "# mtk allow-list -- canonical paths whose .mtk/filters/ may load.\n"
           << "# Edit via `mtk trust <path>` / `mtk untrust <path>`.\n";
         for (const auto& e : entries) f << e.string() << '\n';
         if (!f.good()) {

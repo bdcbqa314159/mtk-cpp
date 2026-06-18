@@ -30,7 +30,7 @@ TEST_CASE("format_status_output collapses branch line and lists changes") {
 TEST_CASE("format_status_output emits clean marker when no changes") {
     auto out = mtk::cmds::git::internal::format_status_output("## main\n");
     CHECK(out.find("* main") != std::string::npos);
-    CHECK(out.find("clean — nothing to commit") != std::string::npos);
+    CHECK(out.find("clean -- nothing to commit") != std::string::npos);
 }
 
 TEST_CASE("format_status_output uses detached ref when supplied") {

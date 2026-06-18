@@ -50,7 +50,7 @@ bool Registry::register_filter(std::unique_ptr<Filter> f, Tier tier, bool is_fin
             rf.filter->name() == new_name) {
             std::cerr << "mtk registry: rejected '" << new_name
                       << "' at tier=" << tier_name(tier)
-                      << " — would shadow final filter from tier="
+                      << " -- would shadow final filter from tier="
                       << tier_name(rf.tier) << " (source="
                       << rf.filter->source() << ")\n";
             return false;

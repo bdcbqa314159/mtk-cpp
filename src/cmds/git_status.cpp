@@ -127,7 +127,7 @@ std::string format_status_output(std::string_view porcelain,
     }
     for (std::size_t i = 1; i < lines.size(); ++i) out.push_back(lines[i]);
     if (lines.size() == 1 && starts_with(lines[0], "##")) {
-        out.emplace_back("clean — nothing to commit");
+        out.emplace_back("clean -- nothing to commit");
     }
     return mtk::core::utils::join_lines(out);
 }
