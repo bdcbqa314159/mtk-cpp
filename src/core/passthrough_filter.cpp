@@ -1,5 +1,8 @@
 #include "core/passthrough_filter.hpp"
 
+#include <string>
+#include <vector>
+
 #include "core/run_context.hpp"
 
 namespace mtk::core {

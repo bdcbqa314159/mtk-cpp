@@ -2,8 +2,13 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
+#include <cstdio>
 #include <regex>
 #include <sstream>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace mtk::core::utils {
 

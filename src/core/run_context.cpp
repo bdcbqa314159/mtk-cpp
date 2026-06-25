@@ -1,11 +1,15 @@
 #include "core/run_context.hpp"
 
 #include <chrono>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
+#include <vector>
 
 #include "core/audit.hpp"
 #include "core/diagnostic.hpp"

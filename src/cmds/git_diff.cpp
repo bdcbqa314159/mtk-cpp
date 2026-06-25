@@ -1,6 +1,12 @@
 #include "cmds/git.hpp"
 
+#include <cstddef>
+#include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 #include "core/color.hpp"
 #include "core/exec.hpp"

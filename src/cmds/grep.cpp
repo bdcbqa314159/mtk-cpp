@@ -1,9 +1,17 @@
 #include "cmds/grep.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <cstddef>
 #include <iostream>
+#include <memory>
+#include <optional>
 #include <sstream>
+#include <string>
+#include <string_view>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "core/color.hpp"
 #include "core/exec.hpp"

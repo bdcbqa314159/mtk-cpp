@@ -5,6 +5,8 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "core/config.hpp"
 #include "core/platform/process_id.hpp"

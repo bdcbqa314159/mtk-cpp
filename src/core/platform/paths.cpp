@@ -1,6 +1,7 @@
 #include "core/platform/paths.hpp"
 
 #include <cstdlib>
+#include <string>
 
 namespace mtk::core::platform {
 

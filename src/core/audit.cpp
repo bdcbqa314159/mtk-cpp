@@ -1,10 +1,20 @@
 #include "core/audit.hpp"
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <fstream>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 #include <nlohmann/json.hpp>
 
 #if defined(_WIN32)

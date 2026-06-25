@@ -1,5 +1,12 @@
 #include "core/toml_filter_adapter.hpp"
 
+#include <cctype>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
 #include "core/run_context.hpp"
 
 namespace mtk::core {

@@ -1,8 +1,11 @@
 #include "core/exec.hpp"
 
 #include <chrono>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
+#include <vector>
 #include <reproc++/drain.hpp>
 #include <reproc++/reproc.hpp>
 

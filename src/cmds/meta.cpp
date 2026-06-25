@@ -1,6 +1,7 @@
 #include "cmds/meta.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -11,6 +12,7 @@
 #include <system_error>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "core/audit.hpp"
 #include "core/color.hpp"

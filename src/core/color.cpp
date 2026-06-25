@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <mutex>
+#include <string>
 #include <string_view>
 
 #include "core/platform/tty.hpp"

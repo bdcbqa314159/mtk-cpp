@@ -1,11 +1,20 @@
 #include "cmds/ls.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <iostream>
+#include <memory>
+#include <optional>
 #include <regex>
 #include <sstream>
+#include <string>
+#include <string_view>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "core/color.hpp"
 #include "core/exec.hpp"
