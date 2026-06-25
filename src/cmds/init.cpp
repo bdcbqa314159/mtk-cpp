@@ -6,6 +6,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "core/exe_path.hpp"
 #include "core/exit_codes.hpp"

@@ -1,9 +1,15 @@
 #include "core/filter_cache.hpp"
 
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "core/platform/paths.hpp"
 #include "core/platform/process_id.hpp"

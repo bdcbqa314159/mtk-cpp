@@ -1,6 +1,12 @@
 #include "core/toml_filter.hpp"
 
+#include <cstddef>
+#include <optional>
 #include <sstream>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 #include <toml++/toml.hpp>
 
 #include "core/utils.hpp"

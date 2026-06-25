@@ -3,7 +3,11 @@
 #include <algorithm>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "core/platform/paths.hpp"
 #include "core/color.hpp"

@@ -2,8 +2,14 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
+#include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 #include "core/constants.hpp"
 #include "core/exec.hpp"

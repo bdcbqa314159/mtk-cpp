@@ -1,8 +1,12 @@
 #include "core/tee.hpp"
 
+#include <cctype>
 #include <chrono>
-#include <fmt/format.h>
 #include <fstream>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <fmt/format.h>
 
 #include "core/color.hpp"
 #include "core/limits.hpp"

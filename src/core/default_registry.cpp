@@ -1,5 +1,10 @@
 #include "core/default_registry.hpp"
 
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "cmds/git.hpp"
 #include "cmds/grep.hpp"
 #include "cmds/ls.hpp"

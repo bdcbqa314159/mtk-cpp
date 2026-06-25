@@ -1,6 +1,7 @@
 #include "core/exit_codes.hpp"
 
 #include <string>
+#include <string_view>
 
 #include "core/diagnostic.hpp"
 

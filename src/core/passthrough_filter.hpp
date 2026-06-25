@@ -1,4 +1,10 @@
 #pragma once
+
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
 #include "core/filter.hpp"
 
 namespace mtk::core {

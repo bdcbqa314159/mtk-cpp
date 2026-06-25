@@ -1,5 +1,8 @@
 #pragma once
+#include <optional>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "core/filter.hpp"
 #include "core/toml_filter.hpp"
