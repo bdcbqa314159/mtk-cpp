@@ -9,6 +9,7 @@ add_executable(mtk_tests
     test_hook.cpp
     test_toml_filter.cpp
     test_utils.cpp
+    test_stats.cpp
 )
 
 target_link_libraries(mtk_tests PRIVATE mtk_lib doctest::doctest)
