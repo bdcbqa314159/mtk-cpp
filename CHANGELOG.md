@@ -7,6 +7,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-06-25
+
+### Fixed
+
+- Include hygiene (IWYU): add directly-used standard headers (e.g.
+  `<atomic>` in `audit.cpp`) so libstdc++/Linux builds compile clean.
+  No API or behavior change; macOS/AppleClang and Windows/MSVC unaffected.
+
 ## [0.1.0] — 2026-06-16
 
 First public release.
@@ -137,5 +145,6 @@ See [GUIDELINES.md](GUIDELINES.md) for the full architectural contract
 (A1-A12 invariants + CE1-CR15 idioms) and [README.md](README.md) for
 the user-facing overview.
 
-[Unreleased]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/bdcbqa314159/mtk-cpp/releases/tag/v0.1.0
