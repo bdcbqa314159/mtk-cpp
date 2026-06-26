@@ -7,6 +7,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-06-26
+
+### Changed
+
+- `mtk stats`: per-filter rows now sort deterministically (by count, then
+  filter name) — previously tie order followed unspecified map iteration order.
+
+### Internal
+
+- Extracted the `mtk stats` aggregation into a pure, unit-tested `core/stats`
+  module (`summarize`, `savings_pct`, `fmt_bytes`). First audit-backed tests
+  (+8 cases / +33 assertions; suite now 66 / 298). No user-facing output change
+  beyond the deterministic sort above.
+
 ## [0.1.1] — 2026-06-25
 
 ### Fixed
@@ -145,6 +159,7 @@ See [GUIDELINES.md](GUIDELINES.md) for the full architectural contract
 (A1-A12 invariants + CE1-CR15 idioms) and [README.md](README.md) for
 the user-facing overview.
 
-[Unreleased]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/bdcbqa314159/mtk-cpp/releases/tag/v0.1.0
