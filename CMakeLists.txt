@@ -164,6 +164,7 @@ set(MTK_CORE_SOURCES
     src/core/default_registry.cpp
     src/core/trust.cpp
     src/core/audit.cpp
+    src/core/stats.cpp
     src/core/filter_cache.cpp
     src/core/platform/paths.cpp
     src/core/platform/file_lock.cpp

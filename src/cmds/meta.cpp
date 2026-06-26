@@ -1,6 +1,5 @@
 #include "cmds/meta.hpp"
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <filesystem>
@@ -10,7 +9,6 @@
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -20,6 +18,7 @@
 #include "core/exit_codes.hpp"
 #include "core/filter_cache.hpp"
 #include "core/registry.hpp"
+#include "core/stats.hpp"
 #include "core/trust.hpp"
 
 namespace mtk::cmds::meta {
@@ -37,17 +36,9 @@ const char* tier_label(mtk::core::Tier t) noexcept {
     return "unknown";
 }
 
-std::string fmt_bytes(std::size_t n) {
-    char buf[32];
-    if (n >= 1024 * 1024) {
-        std::snprintf(buf, sizeof(buf), "%.1fM", static_cast<double>(n) / (1024.0 * 1024.0));
-    } else if (n >= 1024) {
-        std::snprintf(buf, sizeof(buf), "%.1fK", static_cast<double>(n) / 1024.0);
-    } else {
-        std::snprintf(buf, sizeof(buf), "%zuB", n);
-    }
-    return buf;
-}
+// Byte formatter lives in core/stats now (shared + unit tested); alias
+// it so the existing call sites below read unchanged.
+using mtk::core::stats::fmt_bytes;
 
 std::string fmt_argv(const std::vector<std::string>& argv, std::size_t max_len = 60) {
     std::string s;
@@ -221,62 +212,32 @@ int run_stats() {
         return 0;
     }
 
-    struct Agg {
-        std::size_t count = 0;
-        std::size_t bytes_in = 0;
-        std::size_t bytes_out = 0;
-        std::size_t errors = 0;
-        long elapsed_ms_total = 0;
-    };
-    std::unordered_map<std::string, Agg> by_filter;
-    Agg overall;
-    for (const auto& e : events) {
-        auto& f = by_filter[e.filter_name];
-        f.count++;
-        f.bytes_in += e.bytes_in;
-        f.bytes_out += e.bytes_out;
-        if (e.exit_code != 0) f.errors++;
-        f.elapsed_ms_total += e.elapsed_ms;
-
-        overall.count++;
-        overall.bytes_in += e.bytes_in;
-        overall.bytes_out += e.bytes_out;
-        if (e.exit_code != 0) overall.errors++;
-        overall.elapsed_ms_total += e.elapsed_ms;
-    }
-
-    auto pct = [](std::size_t in, std::size_t out) -> long {
-        return in > 0 ? 100 - static_cast<long>(out * 100 / in) : 0;
-    };
+    const auto report = mtk::core::stats::summarize(events);
+    const auto& overall = report.overall;
+    using mtk::core::stats::savings_pct;
 
     std::cout << "mtk stats -- " << events.size() << " events in "
               << mtk::core::audit::log_file() << "\n\n";
     std::cout << "Overall:\n"
               << "  bytes_in:   " << fmt_bytes(overall.bytes_in) << "\n"
               << "  bytes_out:  " << fmt_bytes(overall.bytes_out)
-              << "  (savings " << pct(overall.bytes_in, overall.bytes_out) << "%)\n"
+              << "  (savings " << savings_pct(overall.bytes_in, overall.bytes_out) << "%)\n"
               << "  errors:     " << overall.errors << " / " << overall.count
               << " (" << (overall.count > 0 ? overall.errors * 100 / overall.count : 0)
               << "%)\n"
-              << "  avg time:   "
-              << (overall.count > 0 ? overall.elapsed_ms_total / static_cast<long>(overall.count) : 0)
-              << "ms\n\n";
-
-    std::vector<std::pair<std::string, Agg>> sorted(by_filter.begin(), by_filter.end());
-    std::sort(sorted.begin(), sorted.end(),
-              [](const auto& a, const auto& b) { return a.second.count > b.second.count; });
+              << "  avg time:   " << overall.avg_ms() << "ms\n\n";
 
     std::cout << "By filter (sorted by count):\n";
     std::cout << "  count  filter         bytes_in→out      sav%  err  avg_ms\n";
-    for (const auto& [name, f] : sorted) {
+    for (const auto& [name, f] : report.by_filter) {
         std::printf("  %5zu  %-12s  %6s→%-6s  %4ld%% %4zu  %5ld\n",
                     f.count,
                     name.c_str(),
                     fmt_bytes(f.bytes_in).c_str(),
                     fmt_bytes(f.bytes_out).c_str(),
-                    pct(f.bytes_in, f.bytes_out),
+                    savings_pct(f.bytes_in, f.bytes_out),
                     f.errors,
-                    f.count > 0 ? f.elapsed_ms_total / static_cast<long>(f.count) : 0);
+                    f.avg_ms());
     }
     return 0;
 }
