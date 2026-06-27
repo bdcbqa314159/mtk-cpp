@@ -7,6 +7,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.1.3] — 2026-06-27
+
+### Added
+
+- `pytest` filter (`filters/pytest.toml`) — drops per-test `PASSED` lines and
+  session-start chatter, keeps failures, tracebacks, `file:line`, and pytest's
+  own summary. ~95% compression on a typical run (11.5 KB → 645 B in tests),
+  built entirely on existing DSL keys — no new filter primitive. Matches
+  `^pytest$` only; `python -m pytest` is not yet handled.
+
 ## [0.1.2] — 2026-06-26
 
 ### Changed
@@ -159,7 +169,8 @@ See [GUIDELINES.md](GUIDELINES.md) for the full architectural contract
 (A1-A12 invariants + CE1-CR15 idioms) and [README.md](README.md) for
 the user-facing overview.
 
-[Unreleased]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/bdcbqa314159/mtk-cpp/releases/tag/v0.1.0
