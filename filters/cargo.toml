@@ -1,0 +1,21 @@
+# cargo filter — drop the build-progress chatter and per-test "ok" lines,
+# keep warnings, errors (with their --> file:line context), test failures,
+# panics, and cargo's own summary line. Like pytest, cargo prints its own
+# "test result: ..." tally, so there's nothing to count.
+#
+# Matches argv[0] == "cargo", so it covers build / test / clippy / check.
+# Drop in to ~/.config/mtk/filters/ or .mtk/filters/.
+
+[filters.cargo]
+description = "Compress cargo output — drop Compiling/Finished/per-test ok, keep warnings + errors + failures + summary"
+match_command = "^cargo$"
+strip_ansi = true
+strip_lines_matching = [
+    "^\\s*Compiling ",       # per-crate build progress
+    "^\\s*Updating ",        # registry / index updates
+    "^\\s*Downloading",      # (incl. "Downloading crates ...")
+    "^\\s*Downloaded ",
+    "^\\s*Finished ",        # "Finished test [...] in 2.1s"
+    "^test .* \\.\\.\\. ok$",  # per-test pass lines (keeps FAILED / ignored)
+]
+on_empty = "[mtk: cargo — no warnings or errors]"
