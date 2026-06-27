@@ -7,6 +7,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.1.4] — 2026-06-27
+
+### Added
+
+- `cargo` filter (`filters/cargo.toml`) — drops `Compiling`/`Updating`/
+  `Downloading`/`Finished` progress and per-test `... ok` lines; keeps
+  warnings, errors (with their `-->` `file:line` context), test failures,
+  panics, and cargo's own `test result` summary. Matches `^cargo$`, so it
+  covers `build`/`test`/`clippy`/`check`. Sets `filter_stderr = true` — cargo
+  writes nearly everything to stderr, so without merging it the filter would
+  be a near no-op on `cargo build` and `on_empty` would falsely report a clean
+  build. Built on existing DSL keys; no new primitive. ~76% compression in
+  tests, validated end-to-end against cargo 1.96.
+
 ## [0.1.3] — 2026-06-27
 
 ### Added
@@ -169,7 +183,8 @@ See [GUIDELINES.md](GUIDELINES.md) for the full architectural contract
 (A1-A12 invariants + CE1-CR15 idioms) and [README.md](README.md) for
 the user-facing overview.
 
-[Unreleased]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.0...v0.1.1
