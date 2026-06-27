@@ -1,0 +1,19 @@
+# pytest filter — drop the per-test PASSED noise, keep failures + the
+# summary pytest prints itself. No counting primitive needed: pytest
+# already emits "N failed, M passed in Xs".
+#
+# Drop in to ~/.config/mtk/filters/ or .mtk/filters/.
+
+[filters.pytest]
+description = "Compress pytest output — drop per-test PASSED lines, keep failures + summary"
+match_command = "^pytest$"
+strip_ansi = true
+strip_lines_matching = [
+    "PASSED",        # per-test pass lines (incl. the [ NN%] progress column)
+    "^platform ",    # session-start banner chatter
+    "^rootdir:",
+    "^plugins:",
+    "^cachedir:",
+    "^collected ",
+]
+on_empty = "[mtk: pytest passed — no failures]"
