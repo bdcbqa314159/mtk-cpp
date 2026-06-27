@@ -5,11 +5,18 @@
 #
 # Matches argv[0] == "cargo", so it covers build / test / clippy / check.
 # Drop in to ~/.config/mtk/filters/ or .mtk/filters/.
+#
+# cargo writes nearly everything — warnings, errors, Compiling/Finished
+# progress — to STDERR, not stdout (only the test harness's "running N
+# tests" / per-test lines go to stdout). filter_stderr merges both streams
+# before filtering so the strip patterns and on_empty see the real output;
+# without it the filter is a near no-op on `cargo build`.
 
 [filters.cargo]
 description = "Compress cargo output — drop Compiling/Finished/per-test ok, keep warnings + errors + failures + summary"
 match_command = "^cargo$"
 strip_ansi = true
+filter_stderr = true
 strip_lines_matching = [
     "^\\s*Compiling ",       # per-crate build progress
     "^\\s*Updating ",        # registry / index updates

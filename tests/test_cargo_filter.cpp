@@ -61,6 +61,11 @@ TEST_CASE("cargo filter: keeps warnings/errors/failures, drops chatter, shrinks"
     const auto& f = filters[0];
     CHECK(mtk::core::toml_filter::command_matches(f, "cargo"));
 
+    // Regression guard: cargo emits warnings/errors/progress on stderr, so the
+    // filter MUST merge stderr before stripping — otherwise it's a no-op on
+    // `cargo build` and on_empty falsely reports "no warnings or errors".
+    CHECK(f.filter_stderr);
+
     const std::string input = sample_cargo_output();
     const std::string out = mtk::core::toml_filter::apply(f, input);
 
