@@ -7,6 +7,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.1.5] — 2026-06-28
+
+### Added
+
+- `npm` filter (`filters/npm.toml`) — drops transitive-dep deprecation spam,
+  funding nags, "new version" notices, and the `npm run` script preamble; keeps
+  the install summary, vulnerability tally, and npm errors. Sets
+  `filter_stderr = true` (npm logs warnings/notices to stderr — verified
+  against npm 11.17). Built on existing DSL keys; no new primitive. 66%
+  compression in tests, 89% on a real `npm install`.
+
 ## [0.1.4] — 2026-06-27
 
 ### Added
@@ -183,7 +194,8 @@ See [GUIDELINES.md](GUIDELINES.md) for the full architectural contract
 (A1-A12 invariants + CE1-CR15 idioms) and [README.md](README.md) for
 the user-facing overview.
 
-[Unreleased]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.1...v0.1.2
