@@ -12,6 +12,7 @@ add_executable(mtk_tests
     test_stats.cpp
     test_pytest_filter.cpp
     test_cargo_filter.cpp
+    test_npm_filter.cpp
 )
 
 target_link_libraries(mtk_tests PRIVATE mtk_lib doctest::doctest)

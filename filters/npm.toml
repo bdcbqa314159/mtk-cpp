@@ -1,0 +1,27 @@
+# npm filter — drop npm's ceremony (transitive-dep deprecation spam, funding
+# nags, "new version" notices, the `npm run` script preamble), keep the
+# install summary, the vulnerability tally, and any npm errors.
+#
+# npm logs warnings/notices/progress to STDERR (only some summaries go to
+# stdout), so filter_stderr merges both before stripping — same lesson as the
+# cargo filter; without it the strip patterns never see the chatter.
+#
+# Matches argv[0] == "npm" (install / ci / run / test). The underlying test or
+# build tool's own output is left intact — compress that with its own filter
+# (e.g. a jest/vitest filter), not this one.
+#
+# Drop in to ~/.config/mtk/filters/ or .mtk/filters/.
+
+[filters.npm]
+description = "Compress npm output — drop deprecation/funding/notice chatter + run preamble, keep summary + errors"
+match_command = "^npm$"
+strip_ansi = true
+filter_stderr = true
+strip_lines_matching = [
+    "^npm warn deprecated ",     # transitive-dep deprecation spam
+    "^npm notice",               # "new version available" notices
+    "are looking for funding",   # funding nag (the count line)
+    "run `npm fund`",            # funding nag (the detail line)
+    "^> ",                       # `npm run` preamble: "> pkg@ver script" / "> cmd"
+]
+on_empty = "[mtk: npm — nothing of note]"
