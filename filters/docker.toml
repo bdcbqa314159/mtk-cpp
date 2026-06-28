@@ -1,0 +1,40 @@
+# docker filter — drop the layer-pull progress and build ceremony, keep the
+# build steps, RUN output, status, and the final image ref.
+#
+# Verified against docker 29.6 (colima): `docker pull` and `docker build`
+# write to STDOUT (only the legacy-builder deprecation notice goes to stderr),
+# so no filter_stderr needed. The repeated layer lines all have fixed suffixes
+# ("Pulling fs layer", "Pull complete") and the build-graph lines share the
+# "--->" prefix, so plain strip patterns cover them — no dedupe primitive.
+#
+# Deliberately KEEPS inner RUN output (e.g. apk/npm/pip lines): that's where
+# build failures surface, and we won't gamble error signal for a few bytes.
+#
+# Matches argv[0] == "docker" (pull / build / run logs). Drop in to
+# ~/.config/mtk/filters/ or .mtk/filters/.
+#
+# SCOPE / known gap: tuned + validated against `docker pull` (format-stable)
+# and the LEGACY build output ("Step N/M", "--->"). Modern BuildKit build
+# output ("#N [stage] ... DONE 1.2s") has a different shape these patterns
+# don't touch — add BuildKit patterns once they can be validated against a
+# real buildx run. Inner RUN output (apk/pip/npm) is left intact regardless;
+# compress that with the inner tool in mind, not here.
+
+[filters.docker]
+description = "Compress docker output — drop layer-pull progress + build ceremony, keep steps/RUN/status"
+match_command = "^docker$"
+strip_ansi = true
+strip_lines_matching = [
+    "^Sending build context",   # legacy builder preamble
+    "Pulling fs layer$",        # per-layer pull progress (fixed suffixes)
+    "Waiting$",
+    "Downloading ",
+    "Verifying Checksum$",
+    "Extracting ",
+    "Download complete$",
+    "Pull complete$",
+    "Already exists$",
+    "^Digest: sha256:",         # long, low-signal digest line
+    "^\\s*---> ",               # intermediate image / Running in / Removed container / Using cache
+]
+on_empty = "[mtk: docker — no output]"
