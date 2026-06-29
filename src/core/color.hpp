@@ -20,6 +20,14 @@ namespace mtk::core::color {
 
 [[nodiscard]] bool colors_enabled() noexcept;
 
+// Pure policy resolution behind colors_enabled() — exposed so the decision
+// matrix is unit-testable without mutating process env or memoised state.
+// `no_color`/`mtk_color` are the raw env values (nullptr = unset); `is_tty`
+// is whether stdout is a terminal. Order: NO_COLOR (non-empty) → off;
+// MTK_COLOR never → off / always → on; otherwise follow `is_tty`.
+[[nodiscard]] bool resolve_policy(const char* no_color, const char* mtk_color,
+                                  bool is_tty) noexcept;
+
 // Strip every ANSI escape sequence (CSI + OSC) from `input`. Cheap
 // fast-path for ANSI-free input (returns a copy without running the
 // regex). Always available — independent of colors_enabled().
