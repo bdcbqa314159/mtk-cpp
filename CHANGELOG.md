@@ -7,6 +7,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.1.6] — 2026-06-29
+
+### Added
+
+- `docker` filter (`filters/docker.toml`) — drops layer-pull progress
+  (`Pulling fs layer` / `Download complete` / `Pull complete`) and build
+  ceremony (`Sending build context`, the `--->` intermediate-image lines),
+  keeps build steps, inner `RUN` output (where build failures surface), status,
+  and the final image ref. Built on existing DSL keys; no new primitive.
+  Validated live against docker 29.6: `docker pull` 79%, legacy `docker build`
+  34% (lower by design — `RUN` output is preserved). Known gap: BuildKit build
+  output (`#N … DONE`) has a different shape and is not yet handled.
+
 ## [0.1.5] — 2026-06-28
 
 ### Added
@@ -194,7 +207,8 @@ See [GUIDELINES.md](GUIDELINES.md) for the full architectural contract
 (A1-A12 invariants + CE1-CR15 idioms) and [README.md](README.md) for
 the user-facing overview.
 
-[Unreleased]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.2...v0.1.3
