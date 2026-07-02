@@ -7,6 +7,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.1.8] — 2026-07-02
+
+### Changed
+
+- Colour policy resolution refactored into a pure, testable
+  `resolve_policy(no_color, mtk_color, is_tty)` — `colors_enabled()` now just
+  gathers the env + TTY state and calls it. No behaviour change.
+
+### Internal
+
+- Closed the last test gaps: `test_color.cpp` (full NO_COLOR / MTK_COLOR / TTY
+  precedence matrix + `strip` idempotence), `test_meta.cpp` (`run_rewrite`
+  wrap/passthrough/usage), `test_init.cpp` (`mtk init copilot` writes hook +
+  instructions, upsert is idempotent). CI gate CE6 (every `cmds/*.cpp` has a
+  test) is now clean. Suite: 83 cases / 381 assertions.
+
 ## [0.1.7] — 2026-07-02
 
 ### Fixed
@@ -219,7 +235,8 @@ See [GUIDELINES.md](GUIDELINES.md) for the full architectural contract
 (A1-A12 invariants + CE1-CR15 idioms) and [README.md](README.md) for
 the user-facing overview.
 
-[Unreleased]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.4...v0.1.5
