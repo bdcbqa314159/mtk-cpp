@@ -15,6 +15,9 @@ add_executable(mtk_tests
     test_npm_filter.cpp
     test_docker_filter.cpp
     test_win_launcher.cpp
+    test_color.cpp
+    test_meta.cpp
+    test_init.cpp
 )
 
 target_link_libraries(mtk_tests PRIVATE mtk_lib doctest::doctest)

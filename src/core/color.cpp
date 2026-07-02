@@ -10,25 +10,19 @@
 
 namespace mtk::core::color {
 
-namespace {
-
-bool resolve_policy() noexcept {
+bool resolve_policy(const char* no_color, const char* mtk_color, bool is_tty) noexcept {
     // NO_COLOR: any non-empty value disables. The de-facto standard
     // (no-color.org) says "presence of the variable, regardless of
     // value"; we use non-empty for parity with how `MTK_COLOR` reads.
-    if (const char* nc = std::getenv("NO_COLOR")) {
-        if (*nc != '\0') return false;
-    }
-    if (const char* mc = std::getenv("MTK_COLOR")) {
-        const std::string_view v(mc);
+    if (no_color && *no_color != '\0') return false;
+    if (mtk_color) {
+        const std::string_view v(mtk_color);
         if (v == "never")  return false;
         if (v == "always") return true;
         // "auto" or any other value: fall through to TTY detect.
     }
-    return mtk::core::platform::is_stdout_tty();
+    return is_tty;
 }
-
-}  // namespace
 
 bool colors_enabled() noexcept {
     // Resolve once. std::call_once is cheap after first call and
@@ -37,7 +31,8 @@ bool colors_enabled() noexcept {
     static bool enabled = false;
     static std::once_flag flag;
     std::call_once(flag, [] {
-        enabled = resolve_policy();
+        enabled = resolve_policy(std::getenv("NO_COLOR"), std::getenv("MTK_COLOR"),
+                                 mtk::core::platform::is_stdout_tty());
         // When we're going to emit, make sure Windows console can
         // render the escapes. POSIX is a no-op.
         if (enabled) {
