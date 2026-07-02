@@ -7,6 +7,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.1.7] — 2026-07-02
+
+### Fixed
+
+- Windows `.cmd`/`.bat` shim spawning — commands that resolve to a `.cmd`
+  shim on PATH (e.g. `npm`, `cargo`, many node tools) are now rewritten to
+  `cmd /c <full-path> <args...>` so `CreateProcessW` (which only auto-appends
+  `.exe`) can launch them. Adds short-path quoting for shim paths containing
+  spaces, a category-aware wait timeout, and temp-file capture for node stdio.
+  New `resolve_launcher` seam with `test_win_launcher.cpp` (Windows cases +
+  a POSIX identity case). No behavior change on POSIX.
+
 ## [0.1.6] — 2026-06-29
 
 ### Added
@@ -207,7 +219,8 @@ See [GUIDELINES.md](GUIDELINES.md) for the full architectural contract
 (A1-A12 invariants + CE1-CR15 idioms) and [README.md](README.md) for
 the user-facing overview.
 
-[Unreleased]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/bdcbqa314159/mtk-cpp/compare/v0.1.3...v0.1.4
