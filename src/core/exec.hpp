@@ -48,4 +48,10 @@ using ExecOutcome = std::variant<SpawnFailed, Ran>;
 // for spawn/PATH failures (with a diagnostic emitted to stderr).
 int passthrough(const std::vector<std::string>& argv);
 
+// Rewrite argv so a Windows .cmd/.bat shim (npm, yarn, pnpm, tsc, ...) can be
+// spawned. reproc's CreateProcessW only auto-appends .exe, so bare shim names
+// never resolve; this searches PATH and, on a batch-file match, prepends
+// `cmd /c`. .exe matches and POSIX are returned unchanged. Exposed for tests.
+std::vector<std::string> resolve_launcher(const std::vector<std::string>& argv);
+
 }  // namespace mtk::core::exec
